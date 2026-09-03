@@ -219,6 +219,7 @@ __marimo__/
 
 # Local agent docs
 AGENTS.md
+CLAUDE.md
 agents/
 .ai/
 
@@ -254,3 +255,5 @@ credentials*.json
 
 # Temporary notebooks
 *.nbconvert.ipynb
+
+.claude/*

@@ -7,9 +7,10 @@ POSTECH. O Datathon propõe uma solução end-to-end para apoiar a escolha
 adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegíveis
 de uma instituição financeira.
 
-Esta Etapa 0 estabelece somente a organização inicial e executável do repositório.
-Ainda não há análise exploratória, preparação de dados, treinamento, política
-adaptativa, API funcional ou infraestrutura em nuvem.
+Etapas 0 (organização do repositório) e 1 (base Kaggle e EDA) estão concluídas.
+Ainda não há preparação final da base, baseline, política adaptativa, avaliação,
+serviço demonstrável, arquitetura em nuvem, MLOps ou apresentação final — ver
+checklist abaixo.
 
 ## Problema de negócio
 
@@ -27,11 +28,13 @@ identificadas nos dados.
 
 ## Base de dados
 
-A base inicialmente escolhida é o conjunto público
-[Bank Marketing, no Kaggle](https://www.kaggle.com/datasets/henriqueyamahata/bank-marketing/data).
-O arquivo previsto para uso futuro é `bank-additional-full.csv`, e a variável-alvo
-é `y`, que indica adesão a um depósito a prazo. O dataset não é baixado nem
-versionado nesta etapa.
+A base escolhida é o conjunto público
+[Bank Marketing, no Kaggle](https://www.kaggle.com/datasets/henriqueyamahata/bank-marketing/data)
+(`henriqueyamahata/bank-marketing`). O arquivo usado é `bank-additional-full.csv`
+(41.188 linhas, 21 colunas), e a variável-alvo é `y`, que indica adesão a um
+depósito a prazo (`p̂ = 0.1127`, base desbalanceada ~89/11). O download é feito
+via `kagglehub` no notebook `notebooks/01_eda.ipynb`; o dataset não é versionado
+(`data/raw/` e `data/processed/` são ignorados pelo Git, exceto `.gitkeep`).
 
 ## Formulação inicial (provisória)
 
@@ -47,9 +50,13 @@ implementada:
 - **Baseline:** política fixa baseada no canal com melhor desempenho histórico.
 - **Política adaptativa:** Thompson Sampling com recompensa Bernoulli.
 
-Essa formulação será validada e poderá ser revisada durante a EDA. Em particular,
-a base observacional pode não sustentar comparações justas entre canais sem
-hipóteses adicionais.
+Essa formulação foi parcialmente validada na EDA (`notebooks/01_eda.ipynb`):
+`contact` (braço candidato) mostrou gap de conversão real entre canais
+(cellular 14,7% vs telephone 5,2%), mas esse gap está confundido com regime
+econômico — `telephone` concentra 89% dos contatos em maio/junho, período de
+`emp.var.rate` positivo, enquanto `cellular` concentra em meses de
+`emp.var.rate` negativo (crise 2008–2010). Por isso o resultado é reportado
+como associação observacional, não como efeito causal do canal.
 
 ## Stack tecnológica
 
@@ -148,6 +155,19 @@ Nesse fluxo:
 - `.venv/` é um diretório local e não deve ser versionado;
 - os comandos do projeto devem ser executados preferencialmente com `uv run`.
 
+### Notebook de EDA
+
+Com o ambiente instalado (`uv sync --extra dev` ou equivalente), rode:
+
+```bash
+uv run jupyter notebook notebooks/01_eda.ipynb
+```
+
+A primeira célula de download baixa a base via `kagglehub` — se pedir
+autenticação, configure `~/.kaggle/kaggle.json` ou use `kagglehub.login()`. O
+notebook gera `data/processed/bank_marketing_clean.parquet`, consumido pelas
+próximas etapas.
+
 ### Caminho alternativo — venv e pip
 
 Esse caminho usa as ferramentas tradicionais incluídas no Python. O extra de
@@ -236,8 +256,17 @@ O projeto exige Python **3.11 ou superior e anterior ao Python 3.14**, conforme
 - Dados reais de clientes não serão utilizados; o trabalho usará apenas a base
   pública selecionada e dados permitidos pelo enunciado.
 - Atributos proibidos pelo enunciado não serão usados.
-- A coluna `duration` será excluída das features por representar vazamento
+- A coluna `duration` foi excluída das features por representar vazamento
   temporal: seu valor só é conhecido após a interação.
+- `pdays` foi binarizada (`foi_contatado_antes`) por conter um valor sentinela
+  (999 = "nunca contatado antes") em 96,3% das linhas, incompatível com
+  tratamento como escala numérica contínua.
+- Ausência de dado é codificada no dataset original como categoria
+  `"unknown"`, não como nulo técnico; ela é mantida como categoria própria
+  (não imputada), já que em `default` chega a 20,9% das linhas.
+- O gap de conversão observado entre canais de `contact` está confundido com
+  regime econômico (ver "Formulação inicial") e é reportado como associação,
+  não como efeito causal.
 - Resultados de simulação não serão apresentados como evidência causal.
 - Dados brutos, dados processados, credenciais, execuções locais do MLflow e
   artefatos gerados não devem ser versionados.
@@ -254,12 +283,17 @@ O projeto exige Python **3.11 ou superior e anterior ao Python 3.14**, conforme
 
 ## Checklist do projeto
 
-- [x] Etapa 0 — Estrutura inicial do repositório
-- [ ] Etapa 1 — Entendimento e aquisição dos dados
-- [ ] Etapa 2 — Análise exploratória dos dados
-- [ ] Etapa 3 — Preparação e validação dos dados
-- [ ] Etapa 4 — Baseline e avaliação offline
-- [ ] Etapa 5 — Política adaptativa
-- [ ] Etapa 6 — Rastreamento de experimentos e empacotamento
-- [ ] Etapa 7 — API e arquitetura-alvo
-- [ ] Etapa 8 — Validação final e documentação
+Etapas conforme enunciado oficial do Datathon (`docs/POSTECH - MLET -
+DATATHON.pdf`):
+
+- [x] Etapa 0 — Organização do projeto
+- [x] Etapa 1 — Base Kaggle e EDA
+- [ ] Etapa 2 — Preparação da base
+- [ ] Etapa 3 — Baseline e estratégia algorítmica
+- [ ] Etapa 4 — Avaliação e casos de teste
+- [ ] Etapa 5 — Serviço ou interface demonstrável
+- [ ] Etapa 6 — Arquitetura-alvo em nuvem
+- [ ] Etapa 7 — Ciclo de vida MLOps
+- [ ] Etapa 8 — Apresentação final (Demo Day)
+
+Detalhamento e evidências de cada etapa em `.ai/PROJECT_STATUS.md`.

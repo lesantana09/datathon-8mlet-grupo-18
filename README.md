@@ -7,10 +7,10 @@ POSTECH. O Datathon propõe uma solução end-to-end para apoiar a escolha
 adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegíveis
 de uma instituição financeira.
 
-Etapas 0 (organização do repositório) e 1 (base Kaggle e EDA) estão concluídas.
-Ainda não há preparação final da base, baseline, política adaptativa, avaliação,
-serviço demonstrável, arquitetura em nuvem, MLOps ou apresentação final — ver
-checklist abaixo.
+Etapas 0 (organização do repositório), 1 (base Kaggle e EDA) e 2 (preparação
+da base) estão concluídas. Ainda não há baseline, política adaptativa,
+avaliação, serviço demonstrável, arquitetura em nuvem, MLOps ou apresentação
+final — ver checklist abaixo.
 
 ## Problema de negócio
 
@@ -57,6 +57,26 @@ econômico — `telephone` concentra 89% dos contatos em maio/junho, período de
 `emp.var.rate` positivo, enquanto `cellular` concentra em meses de
 `emp.var.rate` negativo (crise 2008–2010). Por isso o resultado é reportado
 como associação observacional, não como efeito causal do canal.
+
+## Preparação da base (Etapa 2)
+
+`src/datathon_mlet/data_prep.py` transforma o dataset tratado da Etapa 1 em
+contexto, ação e recompensa (`PreparedDataset`, em
+`src/datathon_mlet/models.py`), consumido por `notebooks/02_preparacao.ipynb`:
+
+- **`context`** (17 colunas): todas as features do cliente, exceto `contact`
+  (é a ação), `y` (é o alvo) e `emp.var.rate`/`nr.employed` (redundantes com
+  `euribor3m`, correlação 0,91–0,97 — ver EDA);
+- **`action`**: a coluna `contact` (`cellular`/`telephone`), o braço do
+  bandit;
+- **`reward`**: `y` binarizado (`yes` → 1, `no` → 0).
+
+A função valida a entrada e falha explicitamente (`ValueError`) se a coluna
+`duration` estiver presente, evitando reintroduzir vazamento por engano.
+Decisão de arquitetura: modelos tipados (`PreparedDataset`) + funções puras,
+sem camada de repository/adapter por enquanto — só existe uma fonte de dado
+local hoje; a migração fica fácil se a Etapa 5 (API) ou uma troca de fonte
+exigir.
 
 ## Stack tecnológica
 
@@ -288,7 +308,7 @@ DATATHON.pdf`):
 
 - [x] Etapa 0 — Organização do projeto
 - [x] Etapa 1 — Base Kaggle e EDA
-- [ ] Etapa 2 — Preparação da base
+- [x] Etapa 2 — Preparação da base
 - [ ] Etapa 3 — Baseline e estratégia algorítmica
 - [ ] Etapa 4 — Avaliação e casos de teste
 - [ ] Etapa 5 — Serviço ou interface demonstrável

@@ -8,8 +8,8 @@ adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegív
 de uma instituição financeira.
 
 Etapas 0 (organização do repositório), 1 (base Kaggle e EDA), 2 (preparação
-da base) e 3 (baseline e estratégia algorítmica) estão concluídas. Ainda não
-há avaliação com Golden Set, serviço demonstrável, arquitetura em nuvem,
+da base), 3 (baseline e estratégia algorítmica) e 4 (avaliação e Golden Set)
+estão concluídas. Ainda não há serviço demonstrável, arquitetura em nuvem,
 MLOps ou apresentação final — ver checklist abaixo.
 
 ## Problema de negócio
@@ -112,6 +112,24 @@ com as alternativas consideradas, em
 não foi sorteado aleatoriamente (confundido com regime econômico — ver
 seção "Formulação inicial"). O resultado acima é uma avaliação offline
 sobre dado observacional, não uma medida causal do efeito do canal.
+
+## Avaliação e Golden Set (Etapa 4)
+
+`notebooks/04_avaliacao_golden_set.ipynb` completa a avaliação da Etapa 3
+com uma métrica adicional e um conjunto de teste com clientes reais:
+
+- **Regret médio por rodada** (`taxa_oráculo - taxa_política`, oráculo =
+  `cellular`, 14,74%): baseline fica 9,51 p.p. atrás; Thompson Sampling
+  fica apenas 0,03 p.p. atrás — praticamente ótimo.
+- **Golden Set**: 5 clientes reais (`poutcome` variado), com a recomendação
+  da política treinada (`ThompsonSamplingPolicy.recommend()`, decisão
+  determinística pela média da posterior) comparada ao histórico real. A
+  política recomenda `cellular` para os 5 — esperado, já que o bandit é
+  não-contextual (não personaliza por cliente, só aprende o agregado por
+  canal). Um caso do Golden Set (cliente com campanha anterior malsucedida,
+  contatado por `telephone`, que ainda assim converteu) ilustra ruído
+  individual que uma extensão contextual futura (contexto já preparado na
+  Etapa 2) poderia capturar melhor.
 
 ## Stack tecnológica
 
@@ -345,7 +363,7 @@ DATATHON.pdf`):
 - [x] Etapa 1 — Base Kaggle e EDA
 - [x] Etapa 2 — Preparação da base
 - [x] Etapa 3 — Baseline e estratégia algorítmica
-- [ ] Etapa 4 — Avaliação e casos de teste
+- [x] Etapa 4 — Avaliação e casos de teste
 - [ ] Etapa 5 — Serviço ou interface demonstrável
 - [ ] Etapa 6 — Arquitetura-alvo em nuvem
 - [ ] Etapa 7 — Ciclo de vida MLOps

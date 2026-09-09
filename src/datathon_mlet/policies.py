@@ -14,6 +14,9 @@ class Policy(Protocol):
     def update(self, arm: str, reward: int) -> None:
         """Atualiza a política com a recompensa observada para um braço."""
 
+    def recommend(self) -> str:
+        """Decide de forma determinística o braço a recomendar a um cliente."""
+
 
 class FixedPolicy:
     """Baseline determinístico: sempre escolhe o mesmo braço."""
@@ -26,6 +29,9 @@ class FixedPolicy:
 
     def update(self, arm: str, reward: int) -> None:
         return None
+
+    def recommend(self) -> str:
+        return self.arm
 
 
 class ThompsonSamplingPolicy:
@@ -46,3 +52,10 @@ class ThompsonSamplingPolicy:
             self.alpha[arm] += 1
         else:
             self.beta[arm] += 1
+
+    def recommend(self) -> str:
+        posterior_means = {
+            arm: self.alpha[arm] / (self.alpha[arm] + self.beta[arm])
+            for arm in self.alpha
+        }
+        return max(posterior_means, key=posterior_means.get)

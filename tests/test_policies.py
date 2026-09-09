@@ -22,6 +22,12 @@ def test_fixed_policy_update_is_noop() -> None:
     assert policy.arm == "cellular"
 
 
+def test_fixed_policy_recommend_matches_configured_arm() -> None:
+    policy = FixedPolicy(arm="cellular")
+
+    assert policy.recommend() == "cellular"
+
+
 def test_thompson_sampling_starts_with_configured_prior() -> None:
     policy = ThompsonSamplingPolicy(
         arms=["cellular", "telephone"], prior_alpha=2.0, prior_beta=3.0
@@ -66,3 +72,23 @@ def test_thompson_sampling_select_action_returns_known_arm() -> None:
 
     for _ in range(20):
         assert policy.select_action(rng) in {"cellular", "telephone"}
+
+
+def test_thompson_sampling_recommend_is_deterministic() -> None:
+    policy = ThompsonSamplingPolicy(arms=["cellular", "telephone"])
+    policy.alpha["cellular"] = 50.0
+    policy.beta["telephone"] = 50.0
+
+    recommendations = {policy.recommend() for _ in range(10)}
+
+    assert recommendations == {"cellular"}
+
+
+def test_thompson_sampling_recommend_uses_posterior_mean_not_prior_count() -> None:
+    policy = ThompsonSamplingPolicy(arms=["cellular", "telephone"])
+    policy.alpha["cellular"] = 3.0
+    policy.beta["cellular"] = 3.0
+    policy.alpha["telephone"] = 6.0
+    policy.beta["telephone"] = 2.0
+
+    assert policy.recommend() == "telephone"

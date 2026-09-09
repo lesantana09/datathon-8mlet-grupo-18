@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from datathon_mlet.api.entrypoints.main import app
+from datathon_mlet.policies import FixedPolicy
 
 VALID_CLIENT_PAYLOAD = {
     "age": 37,
@@ -73,3 +74,18 @@ def test_recommendations_rejects_value_outside_allowed_options(
     response = client.post("/recommendations", json=invalid_payload)
 
     assert response.status_code == 422
+
+
+def test_recommendations_follows_injected_policy(client: TestClient) -> None:
+    """A rota devolve o que a política manda — não personaliza pelo payload.
+
+    Substitui a política treinada (dado real) por uma enviesada pra
+    `telephone`, provando que a decisão vem só da política, nunca do
+    contexto do cliente (bandit não-contextual, decisão da Etapa 3).
+    """
+    app.state.policy = FixedPolicy(arm="telephone")
+
+    response = client.post("/recommendations", json=VALID_CLIENT_PAYLOAD)
+
+    assert response.status_code == 200
+    assert response.json()["recommended_action"] == "telephone"

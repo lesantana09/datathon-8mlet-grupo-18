@@ -58,6 +58,18 @@ econômico — `telephone` concentra 89% dos contatos em maio/junho, período de
 `emp.var.rate` negativo (crise 2008–2010). Por isso o resultado é reportado
 como associação observacional, não como efeito causal do canal.
 
+**Por que o braço é canal, e não produto/oferta:** o enunciado descreve o
+problema como "decidir, em diferentes canais, qual oferta... apresentar",
+o que poderia sugerir que a variável de decisão fosse a oferta, não o
+canal. A base escolhida, porém, testa uma única oferta ao longo de toda a
+campanha — depósito a prazo (`y`) — sem nenhuma coluna que represente
+produtos ou mensagens alternativas. Atributos como `housing`/`loan` (o
+cliente já tem financiamento imobiliário ou empréstimo pessoal) são estado
+pré-existente do cliente, não uma ação testada pelo banco na campanha. A
+única dimensão de decisão que a base sustenta com dados reais é o canal de
+contato. Decisão completa em
+`docs/decisions/004-formulacao-braco-canal-vs-oferta.md`.
+
 ## Preparação da base (Etapa 2)
 
 `src/datathon_mlet/data_prep.py` transforma o dataset tratado da Etapa 1 em

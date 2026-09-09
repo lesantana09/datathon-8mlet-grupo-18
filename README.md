@@ -157,7 +157,7 @@ com alternativas consideradas, em
 ### Rodando localmente
 
 ```bash
-uv run uvicorn datathon_mlet.api.entrypoints.main:app --reload
+uv run uvicorn datathon_mlet.api.entrypoints.main:app --reload --port 8081
 ```
 
 ### Rodando com Docker
@@ -167,15 +167,15 @@ a imagem só tem código e dependências; o dado entra em runtime via volume:
 
 ```bash
 docker build -t datathon-mlet-api .
-docker run -p 8000:8000 -v "$(pwd)/data/processed:/app/data/processed:ro" datathon-mlet-api
+docker run -p 8081:8081 -v "$(pwd)/data/processed:/app/data/processed:ro" datathon-mlet-api
 ```
 
 Teste rápido:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8081/health
 
-curl -X POST http://127.0.0.1:8000/recommendations \
+curl -X POST http://127.0.0.1:8081/recommendations \
   -H "Content-Type: application/json" \
   -d '{"age": 37, "job": "admin.", "marital": "married", "education": "university.degree", "default": "no", "housing": "no", "loan": "no", "month": "may", "day_of_week": "mon", "campaign": 1, "pdays": 999, "previous": 0, "poutcome": "nonexistent", "cons.price.idx": 93.994, "cons.conf.idx": -36.4, "euribor3m": 4.857, "foi_contatado_antes": false}'
 ```

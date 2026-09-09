@@ -62,3 +62,14 @@ def test_recommendations_rejects_wrong_type(client: TestClient) -> None:
     response = client.post("/recommendations", json=invalid_payload)
 
     assert response.status_code == 422
+
+
+def test_recommendations_rejects_value_outside_allowed_options(
+    client: TestClient,
+) -> None:
+    invalid_payload = dict(VALID_CLIENT_PAYLOAD)
+    invalid_payload["marital"] = "namorando"
+
+    response = client.post("/recommendations", json=invalid_payload)
+
+    assert response.status_code == 422

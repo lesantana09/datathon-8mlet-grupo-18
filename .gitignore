@@ -195,11 +195,10 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#   you could uncomment the following to ignore the entire vscode folder
-.vscode/
+#   .vscode/ é versionado de propósito neste projeto (launch.json de debug
+#   compartilhado com o time). Ignore arquivos pessoais específicos abaixo
+#   em vez da pasta inteira, se necessário.
+
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 

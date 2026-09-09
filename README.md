@@ -7,10 +7,10 @@ POSTECH. O Datathon propõe uma solução end-to-end para apoiar a escolha
 adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegíveis
 de uma instituição financeira.
 
-Etapas 0 (organização do repositório), 1 (base Kaggle e EDA) e 2 (preparação
-da base) estão concluídas. Ainda não há baseline, política adaptativa,
-avaliação, serviço demonstrável, arquitetura em nuvem, MLOps ou apresentação
-final — ver checklist abaixo.
+Etapas 0 (organização do repositório), 1 (base Kaggle e EDA), 2 (preparação
+da base) e 3 (baseline e estratégia algorítmica) estão concluídas. Ainda não
+há avaliação com Golden Set, serviço demonstrável, arquitetura em nuvem,
+MLOps ou apresentação final — ver checklist abaixo.
 
 ## Problema de negócio
 
@@ -76,7 +76,42 @@ A função valida a entrada e falha explicitamente (`ValueError`) se a coluna
 Decisão de arquitetura: modelos tipados (`PreparedDataset`) + funções puras,
 sem camada de repository/adapter por enquanto — só existe uma fonte de dado
 local hoje; a migração fica fácil se a Etapa 5 (API) ou uma troca de fonte
-exigir.
+exigir. Decisão completa em `docs/decisions/001-etapa2-preparacao-arquitetura.md`.
+
+## Baseline e estratégia algorítmica (Etapa 3)
+
+`notebooks/03_baseline_vs_ts.ipynb` compara um baseline determinístico com
+uma política adaptativa, avaliados via método de replay
+(`src/datathon_mlet/replay.py`) sobre o histórico preparado na Etapa 2:
+
+- **Baseline** (`FixedPolicy`, `src/datathon_mlet/policies.py`): regra fixa
+  arbitrária — sempre `telephone` (5,23% de conversão histórica), simulando
+  uma decisão herdada sem análise de dado por trás;
+- **Política adaptativa** (`ThompsonSamplingPolicy`): Thompson Sampling
+  Beta-Bernoulli, `Beta(1,1)` por braço (`cellular`/`telephone`), sem uso do
+  contexto do cliente (bandit não-contextual — decisão registrada);
+- **Avaliação**: método de replay (Li et al., 2011) — só conta uma rodada
+  quando a ação escolhida pela política coincide com o canal real do
+  cliente no histórico; sem contrafactual inventado.
+
+**Resultado** (20 seeds para o Thompson Sampling; baseline é
+determinístico): baseline = 5,23% de conversão; Thompson Sampling = 14,69%
+± 0,02 p.p. — ganho de aproximadamente 2,8×.
+
+**Por que o baseline não é "o melhor canal histórico":** esse baseline foi
+testado primeiro e empatou com o Thompson Sampling (14,70% vs 14,74%) —
+resultado esperado pela teoria de bandit, já que nenhuma política que
+precisa explorar supera, na média, um oráculo que já começa sabendo a
+resposta certa. O enunciado permite baseline = "regra fixa" **ou** "melhor
+braço histórico"; usamos regra fixa arbitrária para que a política
+adaptativa tivesse algo genuíno para aprender e superar. Decisão completa,
+com as alternativas consideradas, em
+`docs/decisions/002-etapa3-baseline-e-replay.md`.
+
+**Limitação metodológica:** o canal historicamente atribuído a cada cliente
+não foi sorteado aleatoriamente (confundido com regime econômico — ver
+seção "Formulação inicial"). O resultado acima é uma avaliação offline
+sobre dado observacional, não uma medida causal do efeito do canal.
 
 ## Stack tecnológica
 
@@ -309,7 +344,7 @@ DATATHON.pdf`):
 - [x] Etapa 0 — Organização do projeto
 - [x] Etapa 1 — Base Kaggle e EDA
 - [x] Etapa 2 — Preparação da base
-- [ ] Etapa 3 — Baseline e estratégia algorítmica
+- [x] Etapa 3 — Baseline e estratégia algorítmica
 - [ ] Etapa 4 — Avaliação e casos de teste
 - [ ] Etapa 5 — Serviço ou interface demonstrável
 - [ ] Etapa 6 — Arquitetura-alvo em nuvem

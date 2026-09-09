@@ -8,9 +8,9 @@ adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegív
 de uma instituição financeira.
 
 Etapas 0 (organização do repositório), 1 (base Kaggle e EDA), 2 (preparação
-da base), 3 (baseline e estratégia algorítmica) e 4 (avaliação e Golden Set)
-estão concluídas. Ainda não há serviço demonstrável, arquitetura em nuvem,
-MLOps ou apresentação final — ver checklist abaixo.
+da base), 3 (baseline e estratégia algorítmica), 4 (avaliação e Golden Set)
+e 5 (serviço demonstrável) estão concluídas. Ainda não há arquitetura em
+nuvem, MLOps ou apresentação final — ver checklist abaixo.
 
 ## Problema de negócio
 
@@ -130,6 +130,55 @@ com uma métrica adicional e um conjunto de teste com clientes reais:
   contatado por `telephone`, que ainda assim converteu) ilustra ruído
   individual que uma extensão contextual futura (contexto já preparado na
   Etapa 2) poderia capturar melhor.
+
+## Serviço demonstrável (Etapa 5)
+
+API FastAPI que recebe os dados de um cliente e retorna o canal
+recomendado, organizada em 3 camadas (`src/datathon_mlet/`):
+
+- `api/entrypoints/main.py` — app FastAPI, rotas (`GET /health`,
+  `POST /recommendations`), treina a política uma vez no startup;
+- `api/schemas.py` — `ClientContext` (as 17 colunas de contexto da Etapa 2)
+  e `RecommendationResponse`, validação na fronteira;
+- `use_cases.py` — `recommend_channel(policy)`, lógica de aplicação
+  desacoplada de HTTP/Pydantic, reaproveitável por outro tipo de entrypoint
+  (script, CLI) sem duplicar código.
+
+A política é treinada uma vez no startup da API, reaplicando `prepare_features`
++ `run_replay` (mesma lógica testada nas Etapas 2 e 3) sobre
+`data/processed/bank_marketing_clean.parquet`. Como o bandit é
+não-contextual, a recomendação hoje é a mesma para qualquer cliente — o
+contrato já aceita contexto para não quebrar numa extensão contextual
+futura. Persistência de modelo treinado (em vez de retreinar no startup)
+fica para a Etapa 7, quando o MLflow assume esse papel. Decisões completas,
+com alternativas consideradas, em
+`docs/decisions/003-etapa5-api-arquitetura.md`.
+
+### Rodando localmente
+
+```bash
+uv run uvicorn datathon_mlet.api.entrypoints.main:app --reload
+```
+
+### Rodando com Docker
+
+O parquet tratado não é versionado (gerado pelo `notebooks/01_eda.ipynb`) —
+a imagem só tem código e dependências; o dado entra em runtime via volume:
+
+```bash
+docker build -t datathon-mlet-api .
+docker run -p 8000:8000 -v "$(pwd)/data/processed:/app/data/processed:ro" datathon-mlet-api
+```
+
+Teste rápido:
+
+```bash
+curl http://127.0.0.1:8000/health
+
+curl -X POST http://127.0.0.1:8000/recommendations \
+  -H "Content-Type: application/json" \
+  -d '{"age": 37, "job": "admin.", "marital": "married", "education": "university.degree", "default": "no", "housing": "no", "loan": "no", "month": "may", "day_of_week": "mon", "campaign": 1, "pdays": 999, "previous": 0, "poutcome": "nonexistent", "cons.price.idx": 93.994, "cons.conf.idx": -36.4, "euribor3m": 4.857, "foi_contatado_antes": false}'
+```
 
 ## Stack tecnológica
 
@@ -364,7 +413,7 @@ DATATHON.pdf`):
 - [x] Etapa 2 — Preparação da base
 - [x] Etapa 3 — Baseline e estratégia algorítmica
 - [x] Etapa 4 — Avaliação e casos de teste
-- [ ] Etapa 5 — Serviço ou interface demonstrável
+- [x] Etapa 5 — Serviço ou interface demonstrável
 - [ ] Etapa 6 — Arquitetura-alvo em nuvem
 - [ ] Etapa 7 — Ciclo de vida MLOps
 - [ ] Etapa 8 — Apresentação final (Demo Day)

@@ -7,8 +7,7 @@ POSTECH. O Datathon propõe uma solução end-to-end para apoiar a escolha
 adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegíveis
 de uma instituição financeira.
 
-Etapas 0-7 concluídas; falta só a apresentação final (Demo Day) —
-checklist completo no final deste README.
+Etapas 0-7 concluídas — checklist completo no final deste README.
 
 ## Problema de negócio
 
@@ -492,6 +491,3 @@ DATATHON.pdf`):
 - [x] Etapa 5 — Serviço ou interface demonstrável
 - [x] Etapa 6 — Arquitetura-alvo em nuvem
 - [x] Etapa 7 — Ciclo de vida MLOps
-- [ ] Etapa 8 — Apresentação final (Demo Day)
-
-Detalhamento e evidências de cada etapa em `.ai/PROJECT_STATUS.md`.

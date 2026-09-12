@@ -34,10 +34,19 @@
   a cada execução.
 - Validação: rodado de verdade antes de finalizar — `uv run pre-commit
   run --all-files` localmente (ambos os hooks passando) e o YAML do
-  workflow verificado com `actionlint` (0 erros; as tags das actions
-  (`actions/checkout@v7`, `astral-sh/setup-uv@v10`, `actions/cache@v6`)
-  foram conferidas contra os releases reais no GitHub antes de fixar,
-  não presumidas).
+  workflow verificado com `actionlint` (0 erros). As tags foram conferidas
+  contra a API do GitHub antes de fixar — mas a primeira checagem listou
+  as tags mais recentes (`v10.1.0`, `v10.0.1`, `v10.0.0`...) e o `v10` foi
+  escrito por analogia com `actions/checkout`/`actions/cache` (que
+  publicam alias de versão major, ex. `v7`, `v6`), sem confirmar que o
+  `astral-sh/setup-uv` também publica esse alias — não publica. O primeiro
+  push no CI falhou com "Unable to resolve action... unable to find
+  version `v10`". Corrigido para a tag exata `v10.1.0`, desta vez
+  confirmando via `GET /repos/<org>/<repo>/git/refs/tags/<tag>` (resolve
+  só se a ref existir de verdade) para as 4 actions, não só por listagem.
+  Lição registrada: para actions de terceiros, sempre confirmar a
+  referência exata (semver completo) por essa rota, nunca assumir alias
+  de major version por analogia com outra action.
 - Consequências: qualquer contribuidor precisa rodar `uv run pre-commit
   install` uma vez após clonar (documentado no README, nos 3 fluxos de
   instalação) pra ativar o hook local; sem isso, o commit local não é

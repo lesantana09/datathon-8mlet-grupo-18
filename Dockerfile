@@ -15,5 +15,3 @@ ENV PATH="/app/.venv/bin:$PATH"
 VOLUME ["/app/data/processed"]
 
 EXPOSE 8081
-
-CMD ["uvicorn", "datathon_mlet.api.entrypoints.main:app", "--host", "0.0.0.0", "--port", "8081"]

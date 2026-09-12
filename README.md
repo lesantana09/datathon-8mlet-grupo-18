@@ -177,9 +177,14 @@ uv run uvicorn datathon_mlet.api.entrypoints.main:app --reload --port 8081
 O parquet tratado não é versionado (gerado pelo `notebooks/01_eda.ipynb`) —
 a imagem só tem código e dependências; o dado entra em runtime via volume:
 
+A imagem não define um comando padrão (`CMD`) — fica genérica para ser
+reaproveitada por outros serviços que rodem o mesmo código-fonte (ex.
+MLflow na Etapa 7), com o comando de start explícito na hora de rodar:
+
 ```bash
 docker build -t datathon-mlet-api .
-docker run -p 8081:8081 -v "$(pwd)/data/processed:/app/data/processed:ro" datathon-mlet-api
+docker run -p 8081:8081 -v "$(pwd)/data/processed:/app/data/processed:ro" \
+  datathon-mlet-api uvicorn datathon_mlet.api.entrypoints.main:app --host 0.0.0.0 --port 8081
 ```
 
 Teste rápido:
@@ -191,6 +196,84 @@ curl -X POST http://127.0.0.1:8081/recommendations \
   -H "Content-Type: application/json" \
   -d '{"age": 37, "job": "admin.", "marital": "married", "education": "university.degree", "default": "no", "housing": "no", "loan": "no", "month": "may", "day_of_week": "mon", "campaign": 1, "pdays": 999, "previous": 0, "poutcome": "nonexistent", "cons.price.idx": 93.994, "cons.conf.idx": -36.4, "euribor3m": 4.857, "foi_contatado_antes": false}'
 ```
+
+## Arquitetura-alvo em nuvem (Etapa 6)
+
+Como solução de arquitetura em nuvem pública (AWS) para o container
+validado na Etapa 5, optamos por:
+
+- **Compute — Amazon ECS (Fargate).** Roda a mesma imagem Docker da Etapa 5
+  sem adaptação, sem gerenciar EC2 (patch, capacidade). O modelo "um
+  cluster, múltiplos serviços" comporta diretamente o MLflow como segundo
+  container na Etapa 7 — o equivalente em nuvem do `docker-compose` local
+  já cogitado (e adiado) na Etapa 5. Descartamos AWS Lambda: adequado pra
+  API isolada (stateless), mas incompatível com o MLflow tracking server
+  (processo persistente com UI, sem encaixe no modelo de execução sob
+  demanda). Descartamos também AWS App Runner: a AWS anunciou fim de
+  aceitação de novos clientes a partir de 30/04/2026, recomendando o Amazon
+  ECS (Express Mode) como sucessor.
+- **Dado — Amazon S3.** Substitui o volume Docker local que hoje serve o
+  parquet tratado. Custo baixo e adequado ao padrão de acesso atual
+  (leitura em lote, uma vez no startup, sem escrita concorrente) — sem
+  necessidade de um banco transacional (RDS).
+- **Nenhum código foi alterado nesta etapa** — inclusive a possibilidade de
+  já criar uma abstração de storage (`Store` com injeção de dependência
+  para múltiplos backends) foi avaliada e adiada: sem um segundo backend
+  real de uso imediato, essa interface seria abstração prematura.
+
+![Diagrama da arquitetura-alvo: cliente HTTP → Application Load Balancer → Amazon ECS Cluster (Fargate) com as tasks da API FastAPI e do MLflow tracking → Amazon S3 com o parquet tratado](docs/diagrams/etapa6-arquitetura-aws.png)
+
+Fonte editável (componentes reais da AWS) em
+`docs/diagrams/etapa6-arquitetura-aws.drawio` — abra em
+[diagrams.net](https://app.diagrams.net) ou direto na página do arquivo no
+GitHub para editar. Decisão completa, com alternativas descartadas e
+justificativa, em `docs/decisions/005-etapa6-arquitetura-aws.md`.
+
+## Ciclo de vida MLOps (Etapa 7)
+
+MLflow local registra os parâmetros e métricas dos experimentos da Etapa 3
+(baseline vs Thompson Sampling) — histórico comparável de runs, em vez de
+só números impressos numa célula de notebook.
+
+- **Servidor via `docker-compose`, não tracking direto em arquivo.**
+  Serviço `mlflow` no `docker-compose.yml` reusa a mesma imagem Docker da
+  API (só troca o `command:` — ver "Arquitetura-alvo em nuvem" acima, é o
+  mesmo princípio de imagem única aplicado localmente), com backend SQLite
+  (`sqlite:///.../mlflow.db`): o MLflow 3.x descontinuou o backend de
+  arquivo puro (`file:./mlruns`) para o `mlflow server`. Dados persistem
+  em `./mlruns` (volume local, não versionado).
+- **Instrumentação em função do pacote, não direto no notebook.**
+  `src/datathon_mlet/experiments.py`
+  (`log_baseline_vs_thompson_sampling`) roda o baseline e o Thompson
+  Sampling (N seeds) reusando `run_replay` já existente e loga no MLflow:
+  1 run para o baseline; para o Thompson Sampling, 1 run pai com as
+  métricas agregadas (média/desvio-padrão de `conversion_rate` entre
+  seeds) e N runs aninhados, 1 por seed — preserva a rastreabilidade
+  individual exigida pela regra de reportar variabilidade em simulações
+  estocásticas. `notebooks/03_baseline_vs_ts.ipynb` chama essa função em
+  vez de reimplementar o loop.
+- **Escopo: só tracking de parâmetros/métricas, sem MLflow Model
+  Registry.** A `ThompsonSamplingPolicy` não é um estimador scikit-learn;
+  versioná-la como MLflow Model exigiria um wrapper
+  `mlflow.pyfunc.PythonModel`, fora do que esta etapa pede.
+
+### Rodando
+
+```bash
+cp .env.example .env  # ajuste MLFLOW_TRACKING_URI se o servidor não for local
+docker compose up -d mlflow
+```
+
+Abra <http://localhost:5000> para ver os experimentos. Para gerar ou
+atualizar os runs, rode `notebooks/03_baseline_vs_ts.ipynb` — ele lê
+`MLFLOW_TRACKING_URI` do `.env` (via `python-dotenv`), com fallback para
+`http://localhost:5000` se a variável não estiver definida.
+
+Para subir API e MLflow juntos: `docker compose up -d` (sem nome de
+serviço).
+
+Decisões completas, com alternativas descartadas e justificativa, em
+`docs/decisions/006-etapa7-mlflow.md`.
 
 ## Stack tecnológica
 
@@ -426,8 +509,8 @@ DATATHON.pdf`):
 - [x] Etapa 3 — Baseline e estratégia algorítmica
 - [x] Etapa 4 — Avaliação e casos de teste
 - [x] Etapa 5 — Serviço ou interface demonstrável
-- [ ] Etapa 6 — Arquitetura-alvo em nuvem
-- [ ] Etapa 7 — Ciclo de vida MLOps
+- [x] Etapa 6 — Arquitetura-alvo em nuvem
+- [x] Etapa 7 — Ciclo de vida MLOps
 - [ ] Etapa 8 — Apresentação final (Demo Day)
 
 Detalhamento e evidências de cada etapa em `.ai/PROJECT_STATUS.md`.

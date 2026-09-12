@@ -617,6 +617,7 @@ dev = [
     { name = "kagglehub" },
     { name = "matplotlib" },
     { name = "pytest" },
+    { name = "python-dotenv" },
     { name = "ruff" },
     { name = "seaborn" },
 ]
@@ -633,6 +634,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
+    { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "seaborn", marker = "extra == 'dev'", specifier = ">=0.13" },

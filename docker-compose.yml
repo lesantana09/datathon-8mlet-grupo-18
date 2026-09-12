@@ -1,0 +1,32 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data/processed:/app/data/processed:ro
+    command:
+      - uvicorn
+      - datathon_mlet.api.entrypoints.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8081"
+
+  mlflow:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - sqlite:////app/mlruns/mlflow.db
+      - --default-artifact-root
+      - file:/app/mlruns

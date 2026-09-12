@@ -7,11 +7,8 @@ POSTECH. O Datathon propõe uma solução end-to-end para apoiar a escolha
 adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegíveis
 de uma instituição financeira.
 
-Etapas 0 a 7 (organização do repositório, base Kaggle e EDA, preparação da
-base, baseline e estratégia algorítmica, avaliação e Golden Set, serviço
-demonstrável, arquitetura-alvo em nuvem e ciclo de vida MLOps) estão
-concluídas. Falta só a apresentação final (Demo Day) — ver checklist
-abaixo.
+Etapas 0-7 concluídas; falta só a apresentação final (Demo Day) —
+checklist completo no final deste README.
 
 ## Problema de negócio
 
@@ -22,10 +19,10 @@ respeitando privacidade, governança e limitações de inferência.
 
 ## Objetivo da solução
 
-Construir e avaliar, nas próximas etapas, uma solução reprodutível que compare uma
-política fixa com uma política adaptativa para recomendar uma ação entre opções
-elegíveis. A definição final do problema dependerá da qualidade e das limitações
-identificadas nos dados.
+Construímos e avaliamos uma solução reprodutível que compara uma política
+fixa (baseline) com uma política adaptativa (Thompson Sampling) para
+recomendar o canal de contato (`cellular`/`telephone`) a cada cliente
+elegível.
 
 ## Base de dados
 
@@ -37,39 +34,26 @@ depósito a prazo (`p̂ = 0.1127`, base desbalanceada ~89/11). O download é fei
 via `kagglehub` no notebook `notebooks/01_eda.ipynb`; o dataset não é versionado
 (`data/raw/` e `data/processed/` são ignorados pelo Git, exceto `.gitkeep`).
 
-## Formulação inicial (provisória)
+## Formulação
 
-As definições abaixo são hipóteses de trabalho e não representam uma solução já
-implementada:
+- **Contexto:** atributos do cliente conhecidos antes da decisão (17
+  colunas — ver Etapa 2).
+- **Braço:** canal de contato, `cellular` ou `telephone` (coluna
+  `contact`) — não produto/oferta, ver justificativa abaixo.
+- **Recompensa:** `y` binarizado (`yes` → 1, `no` → 0).
+- **Baseline:** regra fixa arbitrária, sempre `telephone` — não "melhor
+  canal histórico" (ver Etapa 3).
+- **Política adaptativa:** Thompson Sampling Beta-Bernoulli.
 
-- **Contexto:** atributos permitidos do cliente e da interação disponíveis antes
-  da decisão.
-- **Braços:** categorias observadas na coluna `contact`, candidatas a representar
-  os canais de contato.
-- **Recompensa:** resposta Bernoulli derivada de `y`, indicando adesão ou não ao
-  depósito a prazo.
-- **Baseline:** política fixa baseada no canal com melhor desempenho histórico.
-- **Política adaptativa:** Thompson Sampling com recompensa Bernoulli.
+A EDA (`notebooks/01_eda.ipynb`) confirma um gap de conversão real entre
+canais (`cellular` 14,7% vs `telephone` 5,2%), mas confundido com regime
+econômico (`telephone` concentra contatos no período de crise 2008–2010)
+— por isso tratado como associação observacional, não causal.
 
-Essa formulação foi parcialmente validada na EDA (`notebooks/01_eda.ipynb`):
-`contact` (braço candidato) mostrou gap de conversão real entre canais
-(cellular 14,7% vs telephone 5,2%), mas esse gap está confundido com regime
-econômico — `telephone` concentra 89% dos contatos em maio/junho, período de
-`emp.var.rate` positivo, enquanto `cellular` concentra em meses de
-`emp.var.rate` negativo (crise 2008–2010). Por isso o resultado é reportado
-como associação observacional, não como efeito causal do canal.
-
-**Por que o braço é canal, e não produto/oferta:** o enunciado descreve o
-problema como "decidir, em diferentes canais, qual oferta... apresentar",
-o que poderia sugerir que a variável de decisão fosse a oferta, não o
-canal. A base escolhida, porém, testa uma única oferta ao longo de toda a
-campanha — depósito a prazo (`y`) — sem nenhuma coluna que represente
-produtos ou mensagens alternativas. Atributos como `housing`/`loan` (o
-cliente já tem financiamento imobiliário ou empréstimo pessoal) são estado
-pré-existente do cliente, não uma ação testada pelo banco na campanha. A
-única dimensão de decisão que a base sustenta com dados reais é o canal de
-contato. Decisão completa em
-`docs/decisions/004-formulacao-braco-canal-vs-oferta.md`.
+**Por que o braço é canal, não oferta:** a base testa uma única oferta
+(depósito a prazo) em toda a campanha, sem coluna de produto alternativo
+— canal é a única dimensão de decisão que os dados sustentam. Decisão
+completa: `docs/decisions/004-formulacao-braco-canal-vs-oferta.md`.
 
 ## Preparação da base (Etapa 2)
 
@@ -84,12 +68,9 @@ contexto, ação e recompensa (`PreparedDataset`, em
   bandit;
 - **`reward`**: `y` binarizado (`yes` → 1, `no` → 0).
 
-A função valida a entrada e falha explicitamente (`ValueError`) se a coluna
-`duration` estiver presente, evitando reintroduzir vazamento por engano.
-Decisão de arquitetura: modelos tipados (`PreparedDataset`) + funções puras,
-sem camada de repository/adapter por enquanto — só existe uma fonte de dado
-local hoje; a migração fica fácil se a Etapa 5 (API) ou uma troca de fonte
-exigir. Decisão completa em `docs/decisions/001-etapa2-preparacao-arquitetura.md`.
+A função falha explicitamente (`ValueError`) se `duration` estiver presente,
+evitando reintroduzir vazamento por engano. Decisão de arquitetura
+completa: `docs/decisions/001-etapa2-preparacao-arquitetura.md`.
 
 ## Baseline e estratégia algorítmica (Etapa 3)
 
@@ -111,20 +92,12 @@ uma política adaptativa, avaliados via método de replay
 determinístico): baseline = 5,23% de conversão; Thompson Sampling = 14,69%
 ± 0,02 p.p. — ganho de aproximadamente 2,8×.
 
-**Por que o baseline não é "o melhor canal histórico":** esse baseline foi
-testado primeiro e empatou com o Thompson Sampling (14,70% vs 14,74%) —
-resultado esperado pela teoria de bandit, já que nenhuma política que
-precisa explorar supera, na média, um oráculo que já começa sabendo a
-resposta certa. O enunciado permite baseline = "regra fixa" **ou** "melhor
-braço histórico"; usamos regra fixa arbitrária para que a política
-adaptativa tivesse algo genuíno para aprender e superar. Decisão completa,
-com as alternativas consideradas, em
-`docs/decisions/002-etapa3-baseline-e-replay.md`.
-
-**Limitação metodológica:** o canal historicamente atribuído a cada cliente
-não foi sorteado aleatoriamente (confundido com regime econômico — ver
-seção "Formulação inicial"). O resultado acima é uma avaliação offline
-sobre dado observacional, não uma medida causal do efeito do canal.
+Baseline é regra fixa arbitrária, não "melhor canal histórico" — esse
+segundo critério empataria com o Thompson Sampling, por ser um oráculo
+(nenhuma política que precisa explorar o supera). Avaliação por replay
+sobre dado observacional (canal não foi sorteado aleatoriamente) — o
+resultado é uma associação, não um efeito causal. Decisão e alternativas
+consideradas: `docs/decisions/002-etapa3-baseline-e-replay.md`.
 
 ## Avaliação e Golden Set (Etapa 4)
 
@@ -134,15 +107,11 @@ com uma métrica adicional e um conjunto de teste com clientes reais:
 - **Regret médio por rodada** (`taxa_oráculo - taxa_política`, oráculo =
   `cellular`, 14,74%): baseline fica 9,51 p.p. atrás; Thompson Sampling
   fica apenas 0,03 p.p. atrás — praticamente ótimo.
-- **Golden Set**: 5 clientes reais (`poutcome` variado), com a recomendação
-  da política treinada (`ThompsonSamplingPolicy.recommend()`, decisão
-  determinística pela média da posterior) comparada ao histórico real. A
-  política recomenda `cellular` para os 5 — esperado, já que o bandit é
-  não-contextual (não personaliza por cliente, só aprende o agregado por
-  canal). Um caso do Golden Set (cliente com campanha anterior malsucedida,
-  contatado por `telephone`, que ainda assim converteu) ilustra ruído
-  individual que uma extensão contextual futura (contexto já preparado na
-  Etapa 2) poderia capturar melhor.
+- **Golden Set**: 5 clientes reais (`poutcome` variado) — a política
+  recomenda `cellular` pros 5 (esperado, bandit não-contextual). Um caso
+  (campanha anterior malsucedida + `telephone`) converteu mesmo assim —
+  ruído individual que uma extensão contextual (contexto já preparado na
+  Etapa 2) capturaria melhor.
 
 ## Serviço demonstrável (Etapa 5)
 
@@ -159,16 +128,12 @@ recomendado, organizada em 3 camadas (`src/datathon_mlet/`):
 - `policy_store.py` — `log_policy` / `load_latest_policy`, publicação e
   carga da política no MLflow.
 
-A API **não treina nada**: no startup ela carrega a política publicada no
-MLflow (run mais recente do experimento `channel_recommendation_policy`).
-O treino virou um passo explícito e separado (`make publish-policy`),
-rodado sempre que se quer publicar uma nova versão. Se o MLflow estiver inacessível ou nenhuma
-política tiver sido publicada, o startup falha com erro explícito, em vez
-de servir silenciosamente um modelo diferente do registrado. Como o bandit
-é não-contextual, a recomendação hoje é a mesma para qualquer cliente — o
-contrato já aceita contexto para não quebrar numa extensão contextual
-futura. Decisões completas, com alternativas consideradas, em
-`docs/decisions/003-etapa5-api-arquitetura.md` e
+A API **não treina nada no startup** — carrega a política publicada mais
+recente no MLflow (`make publish-policy` publica uma nova versão). Sem
+MLflow acessível ou sem nada publicado, o startup falha explicitamente
+(sem fallback silencioso). Bandit não-contextual: a recomendação hoje
+independe do payload do cliente (contrato já aceita contexto para uma
+extensão futura). Decisões: `docs/decisions/003-etapa5-api-arquitetura.md`,
 `docs/decisions/007-api-carrega-policy-do-mlflow.md`.
 
 ### Rodando localmente
@@ -215,67 +180,43 @@ curl -X POST http://127.0.0.1:8081/recommendations \
 Como solução de arquitetura em nuvem pública (AWS) para o container
 validado na Etapa 5, optamos por:
 
-- **Compute — Amazon ECS (Fargate).** Roda a mesma imagem Docker da Etapa 5
-  sem adaptação, sem gerenciar EC2 (patch, capacidade). O modelo "um
-  cluster, múltiplos serviços" comporta diretamente o MLflow como segundo
-  container na Etapa 7 — o equivalente em nuvem do `docker-compose` local
-  já cogitado (e adiado) na Etapa 5. Descartamos AWS Lambda: adequado pra
-  API isolada (stateless), mas incompatível com o MLflow tracking server
-  (processo persistente com UI, sem encaixe no modelo de execução sob
-  demanda). Descartamos também AWS App Runner: a AWS anunciou fim de
-  aceitação de novos clientes a partir de 30/04/2026, recomendando o Amazon
-  ECS (Express Mode) como sucessor.
-- **Dado — Amazon S3.** Substitui o volume Docker local que hoje serve o
-  parquet tratado. Custo baixo e adequado ao padrão de acesso atual
-  (leitura em lote, uma vez no startup, sem escrita concorrente) — sem
-  necessidade de um banco transacional (RDS).
-- **Nenhum código foi alterado nesta etapa** — inclusive a possibilidade de
-  já criar uma abstração de storage (`Store` com injeção de dependência
-  para múltiplos backends) foi avaliada e adiada: sem um segundo backend
-  real de uso imediato, essa interface seria abstração prematura.
+- **Compute — Amazon ECS (Fargate).** Mesma imagem Docker da Etapa 5, sem
+  adaptação; um cluster comporta API e MLflow como serviços separados —
+  o equivalente em nuvem do `docker-compose` local (Etapa 7). Lambda
+  descartado (MLflow precisa de processo persistente, incompatível com
+  execução sob demanda); App Runner descartado (parou de aceitar novos
+  clientes em 2026, AWS recomenda ECS como sucessor).
+- **Dado — Amazon S3.** Substitui o volume local do parquet tratado;
+  leitura em lote não exige banco transacional (RDS).
+- Nenhum código foi alterado nesta etapa — é só o desenho da
+  arquitetura-alvo, sem deploy real.
 
 ![Diagrama da arquitetura-alvo: cliente HTTP → Application Load Balancer → Amazon ECS Cluster (Fargate) com as tasks da API FastAPI e do MLflow tracking → Amazon S3 com o parquet tratado](docs/diagrams/etapa6-arquitetura-aws.png)
 
-Fonte editável (componentes reais da AWS) em
-`docs/diagrams/etapa6-arquitetura-aws.drawio` — abra em
-[diagrams.net](https://app.diagrams.net) ou direto na página do arquivo no
-GitHub para editar. Decisão completa, com alternativas descartadas e
-justificativa, em `docs/decisions/005-etapa6-arquitetura-aws.md`.
+Fonte editável em `docs/diagrams/etapa6-arquitetura-aws.drawio` (abra em
+[diagrams.net](https://app.diagrams.net)). Alternativas descartadas e
+justificativa completa: `docs/decisions/005-etapa6-arquitetura-aws.md`.
 
 ## Ciclo de vida MLOps (Etapa 7)
 
-MLflow local registra os parâmetros e métricas dos experimentos da Etapa 3
-(baseline vs Thompson Sampling) — histórico comparável de runs, em vez de
-só números impressos numa célula de notebook.
+MLflow local registra os parâmetros/métricas dos experimentos da Etapa 3 e
+também guarda a política que a API serve (Etapa 5) — em vez de números
+soltos em notebook ou retreino a cada startup.
 
-- **Servidor via `docker-compose`, não tracking direto em arquivo.**
-  Serviço `mlflow` no `docker-compose.yml` reusa a mesma imagem Docker da
-  API (só troca o `command:` — ver "Arquitetura-alvo em nuvem" acima, é o
-  mesmo princípio de imagem única aplicado localmente), com backend SQLite
-  (`sqlite:///.../mlflow.db`): o MLflow 3.x descontinuou o backend de
-  arquivo puro (`file:./mlruns`) para o `mlflow server`. Dados persistem
-  em `./mlruns` (volume local, não versionado).
-- **Instrumentação em função do pacote, não direto no notebook.**
-  `src/datathon_mlet/experiments.py`
-  (`log_baseline_vs_thompson_sampling`) roda o baseline e o Thompson
-  Sampling (N seeds) reusando `run_replay` já existente e loga no MLflow:
-  1 run para o baseline; para o Thompson Sampling, 1 run pai com as
-  métricas agregadas (média/desvio-padrão de `conversion_rate` entre
-  seeds) e N runs aninhados, 1 por seed — preserva a rastreabilidade
-  individual exigida pela regra de reportar variabilidade em simulações
-  estocásticas. `notebooks/03_baseline_vs_ts.ipynb` chama essa função em
-  vez de reimplementar o loop.
-- **Política servida também sai do MLflow, sem Model Registry.**
-  `src/datathon_mlet/policy_store.py` publica a política treinada como um
-  artifact simples (pickle) num run do experimento
-  `channel_recommendation_policy` (`log_policy`) e a API a recupera no
-  startup (`load_latest_policy`, run mais recente). Optamos por artifact
-  em vez do MLflow Model Registry: com um único modelo e um único
-  consumidor, os ganhos do Registry (promoção Staging→Production,
-  governança, endereçamento estável para vários consumidores) não têm onde
-  se aplicar, e registrar exigiria um wrapper `mlflow.pyfunc.PythonModel`
-  só para satisfazer o formato — a `ThompsonSamplingPolicy` não é um
-  estimador scikit-learn.
+- **Servidor via `docker-compose`**, não tracking em arquivo (MLflow 3.x
+  descontinuou esse backend para o `mlflow server`) — backend SQLite
+  local. Reusa a mesma imagem Docker da API, só troca o `command:`.
+- **Instrumentação em `src/datathon_mlet/experiments.py`**, não no
+  notebook: `log_baseline_vs_thompson_sampling` reusa `run_replay` e loga
+  1 run pro baseline + 1 run pai/N aninhados (1 por seed) pro Thompson
+  Sampling, com os agregados (média/desvio-padrão) no pai.
+- **Política publicada como artifact simples** (`policy_store.py`, pickle
+  num run), sem MLflow Model Registry — com 1 modelo e 1 consumidor, o
+  Registry não traria ganho e exigiria um wrapper `pyfunc` só pra formato
+  (a política não é um estimador scikit-learn).
+
+Decisões completas: `docs/decisions/006-etapa7-mlflow.md`,
+`docs/decisions/007-api-carrega-policy-do-mlflow.md`.
 
 ### Rodando
 
@@ -290,17 +231,12 @@ publicada. Para gerar ou atualizar as métricas de avaliação, rode
 `notebooks/03_baseline_vs_ts.ipynb`; para publicar uma nova versão da
 política que a API serve, rode `make publish-policy` de novo e reinicie a
 API. Ambos leem `MLFLOW_TRACKING_URI` (o notebook via `.env` com
-`python-dotenv`, a
-API via variável de ambiente do container), com fallback para
-`http://localhost:5000`.
+`python-dotenv`, a API via variável de ambiente do container), com
+fallback para `http://localhost:5000`.
 
 Para subir API e MLflow juntos (com uma política já publicada
 anteriormente): `make run`. A API espera o healthcheck do MLflow, mas
 ainda precisa de uma política já publicada para subir com sucesso.
-
-Decisões completas, com alternativas descartadas e justificativa, em
-`docs/decisions/006-etapa7-mlflow.md` e
-`docs/decisions/007-api-carrega-policy-do-mlflow.md`.
 
 ## Stack tecnológica
 
@@ -318,15 +254,24 @@ Decisões completas, com alternativas descartadas e justificativa, em
 
 ```text
 .
+├── .github/workflows/      # CI (GitHub Actions — testes a cada push na main)
 ├── artifacts/              # artefatos gerados (não versionados)
 ├── data/
 │   ├── processed/          # dados processados (não versionados)
 │   └── raw/                # dados brutos (não versionados)
+├── docs/
+│   ├── decisions/          # ADRs — decisões de arquitetura e metodologia
+│   └── diagrams/           # diagramas (ex. arquitetura-alvo AWS)
 ├── notebooks/              # notebooks definitivos do projeto
-├── src/datathon_mlet/      # pacote Python
+├── src/datathon_mlet/      # pacote Python (domínio, API, MLflow)
 ├── tests/                  # testes automatizados
-├── .python-version
+├── .env.example
 ├── .gitignore
+├── .pre-commit-config.yaml
+├── .python-version
+├── docker-compose.yml      # API + MLflow (Etapas 5 e 7)
+├── Dockerfile              # imagem única, reaproveitada pelos dois serviços
+├── Makefile
 ├── pyproject.toml
 └── README.md
 ```

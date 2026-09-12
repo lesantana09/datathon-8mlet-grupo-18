@@ -24,6 +24,7 @@ dev = [
     "jupyter>=1.1",
     "kagglehub>=0.3",
     "matplotlib>=3.9",
+    "pre-commit>=3.8",
     "python-dotenv>=1.0",
     "pytest>=8.3",
     "ruff>=0.9",

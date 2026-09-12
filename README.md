@@ -7,10 +7,11 @@ POSTECH. O Datathon propõe uma solução end-to-end para apoiar a escolha
 adaptativa de um canal, oferta, mensagem ou próximo passo para clientes elegíveis
 de uma instituição financeira.
 
-Etapas 0 (organização do repositório), 1 (base Kaggle e EDA), 2 (preparação
-da base), 3 (baseline e estratégia algorítmica), 4 (avaliação e Golden Set)
-e 5 (serviço demonstrável) estão concluídas. Ainda não há arquitetura em
-nuvem, MLOps ou apresentação final — ver checklist abaixo.
+Etapas 0 a 7 (organização do repositório, base Kaggle e EDA, preparação da
+base, baseline e estratégia algorítmica, avaliação e Golden Set, serviço
+demonstrável, arquitetura-alvo em nuvem e ciclo de vida MLOps) estão
+concluídas. Falta só a apresentação final (Demo Day) — ver checklist
+abaixo.
 
 ## Problema de negócio
 
@@ -149,43 +150,55 @@ API FastAPI que recebe os dados de um cliente e retorna o canal
 recomendado, organizada em 3 camadas (`src/datathon_mlet/`):
 
 - `api/entrypoints/main.py` — app FastAPI, rotas (`GET /health`,
-  `POST /recommendations`), treina a política uma vez no startup;
+  `POST /recommendations`), carrega a política do MLflow no startup;
 - `api/schemas.py` — `ClientContext` (as 17 colunas de contexto da Etapa 2)
   e `RecommendationResponse`, validação na fronteira;
 - `use_cases.py` — `recommend_channel(policy)`, lógica de aplicação
   desacoplada de HTTP/Pydantic, reaproveitável por outro tipo de entrypoint
-  (script, CLI) sem duplicar código.
+  (script, CLI) sem duplicar código;
+- `policy_store.py` — `log_policy` / `load_latest_policy`, publicação e
+  carga da política no MLflow.
 
-A política é treinada uma vez no startup da API, reaplicando `prepare_features`
-+ `run_replay` (mesma lógica testada nas Etapas 2 e 3) sobre
-`data/processed/bank_marketing_clean.parquet`. Como o bandit é
-não-contextual, a recomendação hoje é a mesma para qualquer cliente — o
+A API **não treina nada**: no startup ela carrega a política publicada no
+MLflow (run mais recente do experimento `channel_recommendation_policy`).
+O treino virou um passo explícito e separado (`make publish-policy`),
+rodado sempre que se quer publicar uma nova versão. Se o MLflow estiver inacessível ou nenhuma
+política tiver sido publicada, o startup falha com erro explícito, em vez
+de servir silenciosamente um modelo diferente do registrado. Como o bandit
+é não-contextual, a recomendação hoje é a mesma para qualquer cliente — o
 contrato já aceita contexto para não quebrar numa extensão contextual
-futura. Persistência de modelo treinado (em vez de retreinar no startup)
-fica para a Etapa 7, quando o MLflow assume esse papel. Decisões completas,
-com alternativas consideradas, em
-`docs/decisions/003-etapa5-api-arquitetura.md`.
+futura. Decisões completas, com alternativas consideradas, em
+`docs/decisions/003-etapa5-api-arquitetura.md` e
+`docs/decisions/007-api-carrega-policy-do-mlflow.md`.
 
 ### Rodando localmente
 
+O MLflow precisa estar no ar e ter uma política publicada (ver "Ciclo de
+vida MLOps" abaixo):
+
 ```bash
+docker compose up -d mlflow
+make publish-policy  # só na 1ª vez ou ao republicar
 uv run uvicorn datathon_mlet.api.entrypoints.main:app --reload --port 8081
 ```
 
 ### Rodando com Docker
 
-O parquet tratado não é versionado (gerado pelo `notebooks/01_eda.ipynb`) —
-a imagem só tem código e dependências; o dado entra em runtime via volume:
-
 A imagem não define um comando padrão (`CMD`) — fica genérica para ser
-reaproveitada por outros serviços que rodem o mesmo código-fonte (ex.
-MLflow na Etapa 7), com o comando de start explícito na hora de rodar:
+reaproveitada por outros serviços que rodam o mesmo código-fonte (a API e o
+MLflow saem da mesma imagem), com o comando de start explícito no
+`docker-compose.yml`. Como a API depende do MLflow, o caminho recomendado é
+subir os dois pelo compose:
 
 ```bash
-docker build -t datathon-mlet-api .
-docker run -p 8081:8081 -v "$(pwd)/data/processed:/app/data/processed:ro" \
-  datathon-mlet-api uvicorn datathon_mlet.api.entrypoints.main:app --host 0.0.0.0 --port 8081
+docker compose up -d mlflow
+make publish-policy  # só na 1ª vez ou ao republicar
+docker compose up -d api
 ```
+
+O serviço `api` espera o healthcheck do `mlflow` passar antes de subir e
+recebe `MLFLOW_TRACKING_URI=http://mlflow:5000` (nome do serviço na rede do
+compose — de dentro do container, `localhost` seria o próprio container).
 
 Teste rápido:
 
@@ -252,28 +265,42 @@ só números impressos numa célula de notebook.
   individual exigida pela regra de reportar variabilidade em simulações
   estocásticas. `notebooks/03_baseline_vs_ts.ipynb` chama essa função em
   vez de reimplementar o loop.
-- **Escopo: só tracking de parâmetros/métricas, sem MLflow Model
-  Registry.** A `ThompsonSamplingPolicy` não é um estimador scikit-learn;
-  versioná-la como MLflow Model exigiria um wrapper
-  `mlflow.pyfunc.PythonModel`, fora do que esta etapa pede.
+- **Política servida também sai do MLflow, sem Model Registry.**
+  `src/datathon_mlet/policy_store.py` publica a política treinada como um
+  artifact simples (pickle) num run do experimento
+  `channel_recommendation_policy` (`log_policy`) e a API a recupera no
+  startup (`load_latest_policy`, run mais recente). Optamos por artifact
+  em vez do MLflow Model Registry: com um único modelo e um único
+  consumidor, os ganhos do Registry (promoção Staging→Production,
+  governança, endereçamento estável para vários consumidores) não têm onde
+  se aplicar, e registrar exigiria um wrapper `mlflow.pyfunc.PythonModel`
+  só para satisfazer o formato — a `ThompsonSamplingPolicy` não é um
+  estimador scikit-learn.
 
 ### Rodando
 
 ```bash
 cp .env.example .env  # ajuste MLFLOW_TRACKING_URI se o servidor não for local
 docker compose up -d mlflow
+make publish-policy
 ```
 
-Abra <http://localhost:5000> para ver os experimentos. Para gerar ou
-atualizar os runs, rode `notebooks/03_baseline_vs_ts.ipynb` — ele lê
-`MLFLOW_TRACKING_URI` do `.env` (via `python-dotenv`), com fallback para
-`http://localhost:5000` se a variável não estiver definida.
+Abra <http://localhost:5000> para ver os experimentos e a política
+publicada. Para gerar ou atualizar as métricas de avaliação, rode
+`notebooks/03_baseline_vs_ts.ipynb`; para publicar uma nova versão da
+política que a API serve, rode `make publish-policy` de novo e reinicie a
+API. Ambos leem `MLFLOW_TRACKING_URI` (o notebook via `.env` com
+`python-dotenv`, a
+API via variável de ambiente do container), com fallback para
+`http://localhost:5000`.
 
-Para subir API e MLflow juntos: `docker compose up -d` (sem nome de
-serviço).
+Para subir API e MLflow juntos (com uma política já publicada
+anteriormente): `make run`. A API espera o healthcheck do MLflow, mas
+ainda precisa de uma política já publicada para subir com sucesso.
 
 Decisões completas, com alternativas descartadas e justificativa, em
-`docs/decisions/006-etapa7-mlflow.md`.
+`docs/decisions/006-etapa7-mlflow.md` e
+`docs/decisions/007-api-carrega-policy-do-mlflow.md`.
 
 ## Stack tecnológica
 
@@ -283,6 +310,7 @@ Decisões completas, com alternativas descartadas e justificativa, em
 - FastAPI, Uvicorn e Pydantic;
 - Jupyter, matplotlib e seaborn;
 - pytest, HTTPX e Ruff;
+- pre-commit (Ruff + testes) e GitHub Actions para integração contínua;
 - AWS como arquitetura-alvo futura;
 - `uv` para ambiente e dependências.
 
@@ -362,6 +390,7 @@ cd datathon-7mlet-grupo-18
 uv sync --extra dev
 uv run pytest
 uv run ruff check .
+uv run pre-commit install
 ```
 
 Nesse fluxo:
@@ -370,7 +399,12 @@ Nesse fluxo:
 - `pyproject.toml` declara as dependências do projeto;
 - `uv.lock` registra as versões exatas resolvidas e deve ser versionado;
 - `.venv/` é um diretório local e não deve ser versionado;
-- os comandos do projeto devem ser executados preferencialmente com `uv run`.
+- os comandos do projeto devem ser executados preferencialmente com `uv run`;
+- `uv run pre-commit install` ativa o hook de pré-commit (`.pre-commit-config.yaml`:
+  Ruff + suíte de testes) neste clone — rodar 1x após instalar. Pra rodar
+  os mesmos checks sob demanda (sem esperar um commit): `make pre-commit`.
+  O mesmo comando roda no CI (`.github/workflows/ci.yml`) a cada push na
+  `main`.
 
 ### Notebook de EDA
 
@@ -405,6 +439,7 @@ python -m pip install -e ".[dev]"
 
 pytest
 ruff check .
+pre-commit install
 ```
 
 Dependendo da instalação do Python, o executável pode se chamar `python` em vez
@@ -428,6 +463,7 @@ python -m pip install -e ".[dev]"
 
 pytest
 ruff check .
+pre-commit install
 ```
 
 #### Windows Prompt de Comando
@@ -439,8 +475,8 @@ py -m venv .venv
 .venv\Scripts\activate.bat
 ```
 
-Depois de ativá-lo, execute os mesmos comandos `pip`, `pytest` e `ruff` mostrados
-no fluxo do PowerShell. Para sair do ambiente virtual em qualquer sistema:
+Depois de ativá-lo, execute os mesmos comandos `pip`, `pytest`, `ruff` e
+`pre-commit` mostrados no fluxo do PowerShell. Para sair do ambiente virtual em qualquer sistema:
 
 ```bash
 deactivate

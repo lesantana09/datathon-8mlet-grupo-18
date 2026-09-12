@@ -3,8 +3,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from datathon_mlet.api.entrypoints import main
 from datathon_mlet.api.entrypoints.main import app
-from datathon_mlet.policies import FixedPolicy
+from datathon_mlet.policies import FixedPolicy, ThompsonSamplingPolicy
 
 VALID_CLIENT_PAYLOAD = {
     "age": 37,
@@ -28,7 +29,19 @@ VALID_CLIENT_PAYLOAD = {
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch: pytest.MonkeyPatch):
+    """Substitui o carregamento da política no startup por uma política local.
+
+    A API carrega a política do MLflow no `lifespan`; sem esse patch, a
+    suíte passaria a depender de um servidor MLflow no ar (ver
+    `docs/decisions/007-api-carrega-policy-do-mlflow.md`).
+    """
+    monkeypatch.setattr(
+        main,
+        "load_latest_policy",
+        lambda: ThompsonSamplingPolicy(arms=["cellular", "telephone"]),
+    )
+
     with TestClient(app) as test_client:
         yield test_client
 

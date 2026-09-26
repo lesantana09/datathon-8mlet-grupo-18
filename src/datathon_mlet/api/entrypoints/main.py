@@ -29,7 +29,7 @@ from datathon_mlet.train_and_publish_policy import (
     train_and_publish,
 )
 from datathon_mlet.use_cases import recommend_channel
-from infrastructure.registry import RegistryClient
+from integrations import RegistryClient
 
 from ..schemas import (
     BatchRecommendationItem,

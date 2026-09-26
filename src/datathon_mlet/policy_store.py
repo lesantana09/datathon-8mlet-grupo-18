@@ -14,8 +14,8 @@ import mlflow
 from core.config import settings
 from core.logging import setup_logging
 from datathon_mlet.policies import ThompsonSamplingPolicy
-from infrastructure.registry import RegistryClient
-from infrastructure.storage import StorageClient
+from integrations import RegistryClient
+from integrations import StorageClient
 
 logger = setup_logging()
 

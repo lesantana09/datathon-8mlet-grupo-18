@@ -23,11 +23,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Atualiza a lista de pacotes e instala as dependências necessárias
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
 
-# Baixa o instalador mais recente
-ADD https://astral.sh/uv/0.11.21/install.sh /uv-installer.sh
-
-# Instala e remove o instalador
-RUN sh /uv-installer.sh && rm /uv-installer.sh
+# Baixa o binario mais recente do uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Coloca o instalador na variavel PATH
 ENV PATH="/root/.local/bin/:$PATH"

@@ -13,7 +13,7 @@ from datathon_mlet.policy_store import (
     DEFAULT_S3_MODEL_KEY,
     save_policy_to_s3,
 )
-from infrastructure.storage import StorageClient
+from integrations import StorageClient
 
 logger = setup_logging()
 

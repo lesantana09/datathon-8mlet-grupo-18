@@ -1,5 +1,5 @@
 from datathon_mlet.policies import Policy
-from infrastructure.registry import RegistryClient
+from integrations import RegistryClient
 
 client = RegistryClient()
 

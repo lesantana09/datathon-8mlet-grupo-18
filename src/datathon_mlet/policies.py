@@ -4,7 +4,7 @@ from typing import Protocol
 
 import numpy as np
 
-from infrastructure.registry import RegistryClient
+from integrations import RegistryClient
 
 client = RegistryClient()
 

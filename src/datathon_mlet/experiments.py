@@ -18,7 +18,7 @@ from datathon_mlet.evaluation import (
 )
 from datathon_mlet.policies import FixedPolicy, ThompsonSamplingPolicy
 from datathon_mlet.replay import ReplayResult, run_replay
-from infrastructure import RegistryClient
+from integrations import RegistryClient
 
 client = RegistryClient()
 

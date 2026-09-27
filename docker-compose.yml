@@ -5,16 +5,13 @@ services:
   # FastAPI: Aplicação de Inferência e API
   # --------------------------------------------------------
   api:
+    image: ptsantos/private:datathon-8mlet-grupo-18
     build:
       context: .
-      dockerfile: Dockerfile
-    # image: ptsantos/private:datathon-8mlet-grupo-18
+      dockerfile: deploy/docker/Container
     ports:
       - "${API_PORT:-8081}:8081"
     env_file: ".env"
-    volumes:
-      # Mapeia o código fonte para hot-reload no ambiente local
-      - ./src:/app/src:ro
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:${API_PORT:-8081}/health" ]
       interval: 30s
@@ -29,10 +26,9 @@ services:
       - "${API_PORT:-8081}"
       - "--workers"
       - "${WEB_CONCURRENCY:-1}"
-      - "--reload"
 
   # ---------------------------------------------------------
-  # 3. Observability Layer
+  # Observability Layer
   # ---------------------------------------------------------
   prometheus:
     image: prom/prometheus:v3.13.1

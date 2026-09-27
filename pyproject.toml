@@ -35,10 +35,16 @@ dev = [
     "seaborn>=0.13",
 ]
 
+[tool.uv.pip]
+python-version = "3.11.8"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:The `anyio\\.abc\\.BlockingPortal` alias is deprecated:DeprecationWarning:starlette.testclient"
+]
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]

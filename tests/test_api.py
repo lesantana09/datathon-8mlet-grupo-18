@@ -66,7 +66,7 @@ def test_protected_endpoint_rejects_missing_token(client: TestClient) -> None:
 
 
 def test_recommendations_returns_known_arm(client: TestClient) -> None:
-    response = client.post("/api/v1/model/recommendation", json=VALID_CLIENT_PAYLOAD, auth=AUTH)
+    response = client.post("/api/v1/model/recommend", json=VALID_CLIENT_PAYLOAD, auth=AUTH)
 
     assert response.status_code == 200
     assert response.json()["recommended_action"] in {"cellular", "telephone"}
@@ -76,7 +76,7 @@ def test_recommendations_rejects_missing_field(client: TestClient) -> None:
     incomplete_payload = dict(VALID_CLIENT_PAYLOAD)
     del incomplete_payload["age"]
 
-    response = client.post("/api/v1/model/recommendation", json=incomplete_payload, auth=AUTH)
+    response = client.post("/api/v1/model/recommend", json=incomplete_payload, auth=AUTH)
 
     assert response.status_code == 422
 
@@ -85,7 +85,7 @@ def test_recommendations_rejects_wrong_type(client: TestClient) -> None:
     invalid_payload = dict(VALID_CLIENT_PAYLOAD)
     invalid_payload["age"] = "trinta e sete"
 
-    response = client.post("/api/v1/model/recommendation", json=invalid_payload, auth=AUTH)
+    response = client.post("/api/v1/model/recommend", json=invalid_payload, auth=AUTH)
 
     assert response.status_code == 422
 
@@ -96,7 +96,7 @@ def test_recommendations_rejects_value_outside_allowed_options(
     invalid_payload = dict(VALID_CLIENT_PAYLOAD)
     invalid_payload["marital"] = "namorando"
 
-    response = client.post("/api/v1/model/recommendation", json=invalid_payload, auth=AUTH)
+    response = client.post("/api/v1/model/recommend", json=invalid_payload, auth=AUTH)
 
     assert response.status_code == 422
 
@@ -110,7 +110,7 @@ def test_recommendations_follows_injected_policy(client: TestClient) -> None:
     """
     app.state.policy = FixedPolicy(arm="telephone")
 
-    response = client.post("/api/v1/model/recommendation", json=VALID_CLIENT_PAYLOAD, auth=AUTH)
+    response = client.post("/api/v1/model/recommend", json=VALID_CLIENT_PAYLOAD, auth=AUTH)
 
     assert response.status_code == 200
     assert response.json()["recommended_action"] == "telephone"

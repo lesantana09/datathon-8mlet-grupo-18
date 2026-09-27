@@ -7,7 +7,7 @@ sido publicada, o startup falha explicitamente, em vez de silenciosamente
 servir um modelo diferente do que está registrado.
 
 Como o Thompson Sampling é não-contextual (decisão da Etapa 3),
-`POST /recommendations` recebe o contexto do cliente mas a recomendação hoje
+`POST /recommend` recebe o contexto do cliente mas a recomendação hoje
 é a mesma para qualquer cliente — o contrato já aceita contexto para não
 quebrar numa eventual extensão contextual futura.
 """

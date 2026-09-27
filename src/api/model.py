@@ -55,7 +55,7 @@ def verify_api_key(credentials: HTTPBasicCredentials = Depends(security)):
 
 
 @log_route(logger=logger, include_args=True)
-@router.post("/recommendation", response_model=RecommendationResponse)
+@router.post("/recommend", response_model=RecommendationResponse)
 @client.trace(name="recommend_endpoint", span_type="CHAIN")
 async def recommend(
     request: Request,

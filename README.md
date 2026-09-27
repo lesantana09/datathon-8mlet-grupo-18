@@ -21,6 +21,16 @@ Uma instituição financeira precisa decidir como abordar cada cliente elegível
 
 ---
 
+## Source
+
+- **Dataset:** bank-additional-full.csv
+  - **Contexto:** Campanha de marketing direto de um banco português.
+  - **Autores:** S.M. Almeida and R.C. Almeida
+  - **Link:** http://archive.ics.uci.edu/ml/datasets/Bank+Marketing
+  - **Disponibilizado por:** Henrique Yamahata (https://www.kaggle.com/datasets/henriqueyamahata/bank-marketing)
+
+---
+
 ## Arquitetura de MLOps & Nuvem
 
 O ecossistema foi desenhado com base nos pilares modernos de engenharia de machine learning:
@@ -34,16 +44,16 @@ O ecossistema foi desenhado com base nos pilares modernos de engenharia de machi
                                               │
                                               │ Logs / Traces / Artifacts
                                               │
-┌─────────────────────────┐         ┌─────────┴──────────────┐         ┌─────────────────────────┐
-│       AWS S3 / MinIO    │         │       FastAPI API      │         │   Pipeline de Treino    │
-│   (Data Lake Corporativo)│◄───────┤  (ECS Fargate / Local) ├────────►│    & Sincronização      │
-│ - data/raw/             │ Upload/ │ - POST /recommendations│         │ - train_and_publish     │
-│ - data/processed/       │ Download│ - POST /batch-recom... │         │ - data_lake_sync        │
-│ - models/policy.pkl     │         │ - POST /feedback (RL)  │         │ - experiments.py        │
-└─────────────────────────┘         │ - GET  /model/info     │         └─────────────────────────┘
-                                    │ - POST /model/reload   │
-                                    │ - POST /train          │
-                                    └────────────────────────┘
+┌─────────────────────────┐         ┌─────────┴─────────────────────┐         ┌─────────────────────────┐
+│       AWS S3            │         │         FastAPI API           │         │   Pipeline de Treino    │
+│ (Data Lake Corporativo) │◄───────►┤  (ECS Fargate / Local)        ├────────►│    & Sincronização      │
+│ - data/raw/             │  Upload/│ - POST /api/v1/model/recommend│         │ - make dataset          │
+│ - data/processed/       │ Download│ - GET  /api/v1/model          │         │ - make sync             │
+│ - models/policy.pkl     │         │ - PATCH /api/v1/model         │         │ - make experiment       │
+└─────────────────────────┘         │ - PATCH /api/v1/model/feedback│         │ - make train            │
+                                    │ - PATCH /api/v1/model/batch   │         └─────────────────────────┘
+                                    │ - PUT /api/v1/model/train     │
+                                    └───────────────────────────────┘
 ```
 
 1. **Tracking & Observabilidade (DagsHub / MLflow):**
@@ -63,16 +73,39 @@ A API FastAPI roda por padrão em `http://localhost:8081` (ou `8000`) e inclui d
 
 ### 1. `GET /health`
 Verifica a saúde do serviço (Liveness/Readiness probe).
-- **Resposta:** `{"status": "ok"}`
+- **Exemplo de Requisição:**
+```bash
+curl -X GET http://127.0.0.1:8081/health
+```
+- **Resposta:**
+```json
+{
+  "status": "ok",
+  "service": "datathon-mlet",
+  "version": "1.0.0",
+  "ready": true
+}
+```
 
 ---
 
-### 2. `POST /recommendations`
+### 2. `GET /metrics`
+Exporta métricas para o Prometheus. Ref: [Prometheus Metrics](https://github.com/trallnag/prometheus-fastapi-instrumentator/tree/master?tab=readme-ov-file).
+
+- **Exemplo de Requisição:**
+```bash
+curl -X GET http://127.0.0.1:8081/metrics
+```
+- **Resposta:** Exibe métricas do Prometheus no formato text/plain.
+
+---
+
+### 3. `POST /api/v1/model/recommend`
 Recomenda o canal ideal (`cellular` ou `telephone`) para um cliente com base na política adaptativa ativa. A requisição é instrumentada com span no MLflow Tracing.
 
 - **Exemplo de Requisição:**
 ```bash
-curl -X POST http://127.0.0.1:8081/recommendations \
+curl -X POST http://127.0.0.1:8081/recommend \
   -H "Content-Type: application/json" \
   -d '{
     "age": 37,
@@ -103,12 +136,12 @@ curl -X POST http://127.0.0.1:8081/recommendations \
 
 ---
 
-### 3. `POST /batch-recommendations`
+### 4. `PATCH /api/v1/model/batch`
 Gera recomendações em lote para múltiplos clientes com alto throughput, ideal para processamento diário de campanhas de telemarketing.
 
 - **Exemplo de Requisição:**
 ```bash
-curl -X POST http://127.0.0.1:8081/batch-recommendations \
+curl -X PATCH http://127.0.0.1:8081/api/v1/model/batch \
   -H "Content-Type: application/json" \
   -d '{
     "clients": [
@@ -149,12 +182,12 @@ curl -X POST http://127.0.0.1:8081/batch-recommendations \
 
 ---
 
-### 4. `POST /feedback` *(Loop Fechado do Bandit)*
+### 5. `PATCH /api/v1/model/feedback` *(Loop Fechado do Bandit)*
 Registra o desfecho da interação com o cliente (sucesso/conversão = 1, recusa/falha = 0) para o canal acionado. Atualiza imediatamente em tempo real os parâmetros $\alpha$ e $\beta$ da política em memória (*online continuous learning*).
 
 - **Exemplo de Requisição:**
 ```bash
-curl -X POST http://127.0.0.1:8081/feedback \
+curl -X PATCH http://127.0.0.1:8081/api/v1/model/feedback \
   -H "Content-Type: application/json" \
   -d '{
     "arm": "cellular",
@@ -176,12 +209,12 @@ curl -X POST http://127.0.0.1:8081/feedback \
 
 ---
 
-### 5. `GET /model/info`
+### 6. `GET /api/v1/model/info`
 Auditoria e governança: expõe o estado interno dos braços, parâmetros das distribuições Beta e a decisão recomendada da política servida.
 
 - **Exemplo de Requisição:**
 ```bash
-curl http://127.0.0.1:8081/model/info
+curl http://127.0.0.1:8081/api/v1/model/info
 ```
 - **Resposta:**
 ```json
@@ -206,12 +239,12 @@ curl http://127.0.0.1:8081/model/info
 
 ---
 
-### 6. `POST /model/reload`
+### 7. `PATCH /api/v1/model`
 Recarrega sob demanda a política mais recente publicada no MLflow (ou S3 como fallback) e atualiza o modelo em memória atomicamente (*zero-downtime hot reload*), sem necessidade de reiniciar o container.
 
 - **Exemplo de Requisição:**
 ```bash
-curl -X POST http://127.0.0.1:8081/model/reload
+curl -X PATCH http://127.0.0.1:8081/api/v1/model
 ```
 - **Resposta:**
 ```json
@@ -226,12 +259,12 @@ curl -X POST http://127.0.0.1:8081/model/reload
 
 ---
 
-### 7. `POST /train`
+### 8. `PUT /api/v1/model/train`
 Gatilho de Retreinamento Contínuo (*Continuous Training - CT*). Treina a política com os dados especificados, publica a nova versão no MLflow/S3 e atualiza imediatamente a política servida pela aplicação.
 
 - **Exemplo de Requisição:**
 ```bash
-curl -X POST http://127.0.0.1:8081/train \
+curl -X PUT http://127.0.0.1:8081/api/v1/model/train \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_path": "data/processed/bank_marketing_clean.parquet",
@@ -264,34 +297,37 @@ git clone https://github.com/FIAP-ML-Engineering/datathon-8mlet-grupo-18.git
 cd datathon-8mlet-grupo-18
 
 # Instale as dependências principais e de desenvolvimento
-uv sync --extra dev
+make dev
 ```
 
 ### 2. Configuração de Variáveis de Ambiente (`.env`)
 
-Crie o arquivo `.env` na raiz do projeto contendo as credenciais de acesso ao DagsHub e AWS S3:
+Copie o arquivo `.env.example` para `.env` na raiz do projeto e atualize as variáveis de ambiente:
 
 ```ini
-# ==========================================
-# Configurações Globais
-# ==========================================
+# API
 ENVIRONMENT=local
-
-# ==========================================
-# DagsHub / MLflow Tracking Remoto
-# ==========================================
-DAGSHUB_APP_TOKEN=<SEU_TOKEN_DAGSHUB>
-MLFLOW_TRACKING_URI=https://dagshub.com/<USUARIO>/<REPOSITORIO>.mlflow
-MLFLOW_TRACKING_USERNAME=<USUARIO_DAGSHUB>
-MLFLOW_EXPERIMENT_NAME=datathon-mlet-experiments
-
-# ==========================================
-# AWS S3 / MinIO (Data Lake)
-# ==========================================
-AWS_REGION=us-east-1
-AWS_ENDPOINT_URL=https://s3.amazonaws.com
-AWS_ACCESS_KEY=<SUA_AWS_ACCESS_KEY>
-AWS_SECRET_KEY=<SUA_AWS_SECRET_KEY>
+API_HOST=0.0.0.0
+API_PORT=8081
+API_V1_STR=/api/v1
+WEB_CONCURRENCY=1
+API_USERNAME = "<USUARIO_API>"
+API_PASSWORD = "<SENHA_API>"
+# MLFOW
+DAGSHUB_APP_TOKEN = "<DAGSHUB_APP_TOKEN>"
+MLFLOW_TRACKING_URI = "https://dagshub.com/<USUARIO>/<REPOSITORIO>.mlflow"
+MLFLOW_EXPERIMENT_NAME = "datathon-mlet-experiments"
+MLFLOW_TRACKING_USERNAME = "<USUARIO_DAGSHUB>"
+# AWS
+BUCKET_NAME = "datathon-8mlet-grupo-18"
+AWS_REGION = "<AWS_REGION>"
+AWS_ENDPOINT_URL = "<AWS_ENDPOINT_URL>"
+AWS_ACCESS_KEY = "<AWS_ACCESS_KEY>"
+AWS_SECRET_KEY = "<AWS_SECRET_KEY>"
+# Grafana
+GF_SECURITY_ADMIN_USER = "<USUARIO_GRAFANA>"
+GF_SECURITY_ADMIN_PASSWORD = "<SENHA_GRAFANA>"
+GF_AUTH_ANONYMOUS_ENABLED = true
 ```
 
 ### 3. Sincronização do Data Lake (S3)
@@ -299,7 +335,8 @@ AWS_SECRET_KEY=<SUA_AWS_SECRET_KEY>
 Para enviar os datasets (`raw` e `processed`) e o modelo treinado para o bucket S3 `datathon-8mlet-grupo-18`:
 
 ```bash
-uv run python -m datathon_mlet.data_lake_sync
+make dataset
+make sync
 ```
 
 ### 4. Treinamento e Publicação da Política no MLflow
@@ -307,7 +344,7 @@ uv run python -m datathon_mlet.data_lake_sync
 Para executar o treinamento do modelo via CLI e publicá-lo no DagsHub MLflow:
 
 ```bash
-uv run python -m datathon_mlet.train_and_publish_policy
+make train
 ```
 
 ### 5. Execução dos Experimentos e Geração de Artefatos
@@ -315,15 +352,7 @@ uv run python -m datathon_mlet.train_and_publish_policy
 Para rodar a comparação entre Baseline e Thompson Sampling com registro das métricas e geração dos gráficos no MLflow:
 
 ```bash
-uv run python -c "
-from datathon_mlet.data_prep import load_clean_dataset, prepare_features
-from datathon_mlet.experiments import log_baseline_vs_thompson_sampling
-from pathlib import Path
-
-df = load_clean_dataset(Path('data/processed/bank_marketing_clean.parquet'))
-prep = prepare_features(df)
-log_baseline_vs_thompson_sampling(prep.action, prep.reward, arms=['cellular', 'telephone'], baseline_arm='telephone', n_seeds=20)
-"
+make experiment
 ```
 
 ### 6. Execução da API FastAPI
@@ -331,7 +360,7 @@ log_baseline_vs_thompson_sampling(prep.action, prep.reward, arms=['cellular', 't
 Inicie o servidor Uvicorn:
 
 ```bash
-uv run uvicorn datathon_mlet.api.entrypoints.main:app --reload --port 8081
+make local
 ```
 
 Acesse o Swagger interativo em: **<http://localhost:8081/docs>**
@@ -344,10 +373,13 @@ O projeto conta com uma suíte abrangente de **52 testes automatizados** cobrind
 
 ```bash
 # Executa todos os testes unitários e de integração
-uv run pytest
+make test
 
-# Executa checagem de estilo e formatação com Ruff
-uv run ruff check .
+# Executa checagem de estilo e formatação
+make format
+
+# Executa checagem de estilo e formatação (same as CI)
+make pre-commit
 ```
 
 ---
@@ -356,28 +388,40 @@ uv run ruff check .
 
 ```text
 .
-├── data/
-│   ├── processed/          # Dataset limpo (bank_marketing_clean.parquet)
-│   └── raw/                # Dataset original (bank-additional-full.csv)
-├── docs/                   # Documentação, decisões de arquitetura (ADRs) e diagramas
-├── notebooks/              # Notebooks das etapas 1 a 4 (EDA, preparação, avaliação)
-├── src/
-│   ├── core/               # Configurações Pydantic Settings e logging estruturado
-│   ├── datathon_mlet/      # Domínio da aplicação
-│   │   ├── api/            # Entrypoints FastAPI e schemas Pydantic
-│   │   ├── data_prep.py    # Preparação de features e isolamento de leakage
-│   │   ├── evaluation.py   # Curvas de aprendizado e densidades Beta posteriores
-│   │   ├── experiments.py  # Instrumentação de experimentos MLflow
-│   │   ├── policies.py     # Thompson Sampling e Baseline Determinístico
-│   │   ├── policy_store.py # Persistência híbrida MLflow & AWS S3
-│   │   ├── replay.py       # Replay offline sobre dado histórico
-│   │   ├── data_lake_sync.py # Sincronização de dados e modelos no S3
+├── data/                               # Datasets e artefatos de dados
+│   ├── processed/                      # Dataset limpo (bank_marketing_clean.parquet)
+│   └── raw/                            # Dataset original (bank-additional-full.csv)
+├── deploy/                             # Scripts, configurações e arquivos para deploy dos serviços
+│   ├── docker/                         # Dockerfiles para deploy dos serviços
+│   └── terraform/                      # Scripts e configurações Terraform para deploy dos serviços
+├── docs/                               # Documentação, decisões de arquitetura (ADRs) e diagramas
+├── monitoring/                         # Configurações de monitoramento
+│   ├── grafana/                        # Configurações do Grafana
+│   ├── loki/                           # Configurações do Loki
+│   ├── prometheus/                     # Configurações do Prometheus
+│   ├── promtail/                       # Configurações do Promtail
+│   ├── provisioning/                   # Arquivos de configuração e scripts para provisionamento dos serviços
+│   └── README.md                       # Instruções para provisionamento dos serviços de observabilidade
+├── notebooks/                          # Notebooks das etapas 1 a 4 (EDA, preparação, avaliação)
+├── src/                                # Código-fonte da aplicação
+│   ├── api/                            # FastAPI e rotas
+│   ├── core/                           # Configurações Pydantic Settings e logging estruturado
+│   ├── datathon_mlet/                  # Domínio da aplicação
+│   │   ├── data_prep.py                # Preparação de features e isolamento de leakage
+│   │   ├── evaluation.py               # Curvas de aprendizado e densidades Beta posteriores
+│   │   ├── experiments.py              # Instrumentação de experimentos MLflow
+│   │   ├── policies.py                 # Thompson Sampling e Baseline Determinístico
+│   │   ├── policy_store.py             # Persistência híbrida MLflow & AWS S3
+│   │   ├── replay.py                   # Replay offline sobre dado histórico
+│   │   ├── data_lake_sync.py           # Sincronização de dados e modelos no S3
 │   │   └── train_and_publish_policy.py # Script de treino e publicação
-│   └── infrastructure/     # Clientes externos (RegistryClient e StorageClient)
-├── tests/                  # 52 testes automatizados (API, S3, Replay, Plots)
-├── pyproject.toml          # Gerenciamento de dependências e ferramentas
-├── .env.example            # Template de variáveis de ambiente
-└── README.md
+│   ├── domain/                         # Schemas Pydantic
+│   └── integrations/                   # Clientes externos (RegistryClient e StorageClient)
+├── tests/                              # 52 testes automatizados (API, S3, Replay, Plots)
+├── .env.example                        # Template de variáveis de ambiente
+├── Makefile                            # Makefile para automação de tarefas
+├── pyproject.toml                      # Gerenciamento de dependências e ferramentas
+└── README.md                           # README do projeto
 ```
 
 ---

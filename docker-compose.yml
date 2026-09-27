@@ -5,7 +5,7 @@ services:
   # FastAPI: Aplicação de Inferência e API
   # --------------------------------------------------------
   api:
-    image: ptsantos/private:datathon-8mlet-grupo-18
+    image: ghcr.io/tramontano/datathon-8mlet-grupo-18:1.0.0
     build:
       context: .
       dockerfile: deploy/docker/Container

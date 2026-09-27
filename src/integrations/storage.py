@@ -34,8 +34,8 @@ class StorageClient:
         """
         self.region_name = settings.AWS_REGION
         self.endpoint_url = settings.AWS_ENDPOINT_URL
-        self.access_key = settings.AWS_ACCESS_KEY
-        self.secret_key = settings.AWS_SECRET_KEY
+        self.access_key = settings.DAGSHUB_APP_TOKEN
+        self.secret_key = settings.DAGSHUB_APP_TOKEN
         self.s3_client = boto3.client(
             "s3",
             endpoint_url=self.endpoint_url,
@@ -174,7 +174,7 @@ class StorageClient:
             # Qualquer outro erro (403 permissões, rede, etc.)
             raise e
 
-    def save_parquet(self, df: pd.DataFrame, bucket: str, file_path: str) -> None:
+    def save_parquet(self, df: pd.DataFrame, bucket: str, file_path: str) -> str:
         """
         Salva um DataFrame num bucket em formato Parquet.
 
@@ -192,6 +192,7 @@ class StorageClient:
                 Bucket=bucket, Key=file_path, Body=parquet_buffer.getvalue()
             )
             logger.debug(f"Ficheiro guardado com sucesso: s3://{bucket}/{file_path}")
+            return f"s3://{bucket}/{file_path}"
         except Exception as e:
             logger.error(f"Erro ao guardar ficheiro no S3: {e}")
             raise e
@@ -263,7 +264,7 @@ class StorageClient:
             logger.error(f"Erro ao verificar pasta no S3: {e}")
             raise e
 
-    def delete_parquet(self, bucket: str, file_path: str) -> None:
+    def delete_parquet(self, bucket: str, file_path: str) -> str:
         """
         Apaga um ficheiro Parquet do Data Lake.
 
@@ -274,6 +275,7 @@ class StorageClient:
         try:
             self.s3_client.delete_object(Bucket=bucket, Key=file_path)
             logger.debug(f"Ficheiro apagado com sucesso: s3://{bucket}/{file_path}")
+            return f"s3://{bucket}/{file_path}"
         except Exception as e:
             logger.error(f"Erro ao apagar ficheiro no S3: {e}")
             raise e
@@ -282,7 +284,8 @@ class StorageClient:
 if __name__ == "__main__":
     storage = StorageClient()
     df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
-    storage.save_parquet(df, "datathon-8mlet-grupo-18", "test.parquet")
-    storage.file_exists("datathon-8mlet-grupo-18", "test.parquet")
-    storage.delete_parquet("datathon-8mlet-grupo-18", "test.parquet")
-    storage.file_exists("datathon-8mlet-grupo-18", "test.parquet")
+    print(df.to_csv())
+    print("Save parquet: ", storage.save_parquet(df, "datathon-8mlet-grupo-18", "test.parquet"))
+    print("Arquivo existe? ", storage.file_exists("datathon-8mlet-grupo-18", "test.parquet"))
+    print("Delete parquet: ", storage.delete_parquet("datathon-8mlet-grupo-18", "test.parquet"))
+    print("Arquivo existe? ", storage.file_exists("datathon-8mlet-grupo-18", "test.parquet"))

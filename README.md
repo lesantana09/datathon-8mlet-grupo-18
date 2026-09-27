@@ -64,6 +64,9 @@ O ecossistema foi desenhado com base nos pilares modernos de engenharia de machi
    - Bucket: `datathon-8mlet-grupo-18`
    - Armazena as bases brutas (`data/raw/`), tratadas (`data/processed/`) e o backup do modelo (`models/policy.pkl`).
    - Fornece fallback de alta disponibilidade (HA): se o MLflow estiver temporariamente inacessível, a API carrega o modelo diretamente do S3.
+3. **Infraestrutura como Código & Nuvem (AWS ECS Fargate & Terraform):**
+   - Provisionamento 100% automatizado e reproduzível com **Terraform** (`deploy/terraform/`).
+   - Execução serverless da API conteinerizada no **AWS ECS Fargate**, em VPC dedicada com subnets públicas distribuídas em múltiplas zonas de disponibilidade (`us-east-2`), Security Group com controle estrito de portas e credenciais protegidas via **AWS Secrets Manager**.
 
 ---
 
@@ -293,7 +296,7 @@ O projeto utiliza o gerenciador [`uv`](https://docs.astral.sh/uv/) e requer Pyth
 
 ```bash
 # Clone o repositório
-git clone https://github.com/FIAP-ML-Engineering/datathon-8mlet-grupo-18.git
+git clone https://github.com/lesantana09/datathon-8mlet-grupo-18.git
 cd datathon-8mlet-grupo-18
 
 # Instale as dependências principais e de desenvolvimento
@@ -367,6 +370,164 @@ Acesse o Swagger interativo em: **<http://localhost:8081/docs>**
 
 ---
 
+## Deploy na AWS (Infraestrutura como Código com Terraform)
+
+O provisionamento da infraestrutura na nuvem AWS é totalmente gerenciado como código (IaC) através do **Terraform** (`deploy/terraform/`) e orquestrado de forma simplificada pelos comandos do [`Makefile`](file:///e:/stacks/datathon-8mlet-grupo-18/Makefile).
+
+A aplicação é executada como um serviço conteinerizado serverless no **AWS ECS Fargate**, dispensando o gerenciamento manual de instâncias EC2, patches de sistema operacional ou provisionamento de capacidade fixa.
+
+### 1. Arquitetura Provisionada
+
+Ao executar o deploy, o Terraform provisiona os seguintes recursos na região **`us-east-2`** (Ohio):
+
+- **Rede e Conectividade (VPC & Subnets):**
+  - **VPC Própria (`aws_vpc.main`):** Bloco CIDR `10.0.0.0/16` com suporte a hostnames DNS.
+  - **Subnets Públicas (`aws_subnet.public_1` e `public_2`):** `10.0.1.0/24` (AZ `us-east-2a`) e `10.0.2.0/24` (AZ `us-east-2b`), com atribuição automática de IP público.
+  - **Internet Gateway & Route Table (`aws_internet_gateway.gw`, `aws_route_table.rt`):** Rota padrão `0.0.0.0/0` para acesso e saída à internet.
+- **Segurança e Controle de Acesso:**
+  - **Security Group (`aws_security_group.ecs_sg`):** Libera tráfego de entrada na porta da API (`8081/tcp`) de qualquer origem (`0.0.0.0/0`) e permite tráfego de saída irrestrito para download da imagem Docker e comunicação externa com DagsHub/MLflow e AWS S3.
+  - **AWS Secrets Manager (`aws_secretsmanager_secret.docker_hub`):** Guarda as credenciais do Docker Hub (`DOCKER_HUB_USERNAME` e `DOCKER_HUB_TOKEN`) de forma segura, com exclusão imediata configurada (`recovery_window_in_days = 0`).
+  - **IAM Roles & Policies (`aws_iam_role.ecs_execution_role`):** Role de execução com a política gerenciada `AmazonECSTaskExecutionRolePolicy` e política inline para leitura do segredo no Secrets Manager.
+- **Computação Serverless (AWS ECS Fargate):**
+  - **Cluster ECS (`aws_ecs_cluster.main`):** `datathon-cluster`.
+  - **Task Definition (`aws_ecs_task_definition.app`):** Modo Fargate com 0.25 vCPU (256 CPU units) e 512 MB de RAM, executando a imagem `ghcr.io/tramontano/datathon-8mlet-grupo-18:1.0.0` com comando `uvicorn api:app --host 0.0.0.0 --port 8081`. Todas as variáveis de ambiente necessárias (API, DagsHub MLflow e AWS S3) são injetadas automaticamente a partir do `.env`.
+  - **ECS Service (`aws_ecs_service.main`):** `datathon-service`, mantendo 1 réplica da task ativa com IP público em rede pública.
+
+---
+
+### 2. Pré-requisitos
+
+1. **Terraform CLI** instalado (versão `>= 1.5.0` recomendada) — [Instruções de Instalação](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli).
+2. **AWS CLI** instalado e autenticado (opcional, para consultar o IP da task via terminal) — [Instalação da AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+3. **Arquivo `.env` configurado** na raiz do projeto contendo as chaves AWS (`AWS_ACCESS_KEY`, `AWS_SECRET_KEY`), credenciais do Docker Hub (`DOCKER_HUB_USERNAME`, `DOCKER_HUB_TOKEN`) e parâmetros de API e MLflow.
+
+> [!NOTE]
+> O arquivo [`deploy/terraform/variables.tf`](file:///e:/stacks/datathon-8mlet-grupo-18/deploy/terraform/variables.tf) lê e decodifica diretamente o arquivo `.env` localizado na raiz do projeto. Não é necessário exportar variáveis manualmente nem criar arquivos `.tfvars`.
+
+---
+
+### 3. Passo a Passo do Deploy via Makefile
+
+Todos os comandos de gerenciamento de ciclo de vida da infraestrutura AWS estão disponíveis diretamente no `Makefile`:
+
+```
+make aws-init     # 1. Inicializa o Terraform e baixa os provedores
+make aws-plan     # 2. Visualiza o plano de execução (dry-run)
+make aws-apply    # 3. Provisiona toda a infraestrutura na AWS
+make aws-output   # 4. Exibe os nomes do cluster, serviço e query de IP público
+make aws-destroy  # 5. Destrói toda a infraestrutura e evita custos
+```
+
+#### Passo 1 — Inicializar o Terraform
+Inicializa o diretório de trabalho do Terraform e baixa o provedor oficial `hashicorp/aws`:
+```bash
+make aws-init
+```
+
+#### Passo 2 — Planejar e Validar Recursos
+Gera o plano de execução (*dry-run*), listando todos os recursos que serão criados ou atualizados sem aplicar modificações na nuvem:
+```bash
+make aws-plan
+```
+
+#### Passo 3 — Aplicar e Provisionar a Infraestrutura
+Cria a VPC, Subnets, Security Group, Secrets Manager, IAM Roles, Cluster ECS, Task Definition e inicializa o Serviço Fargate:
+```bash
+make aws-apply
+```
+> [!IMPORTANT]
+> O Terraform solicitará a confirmação digitando `yes`. Após a confirmação, o provisionamento leva aproximadamente 1 a 2 minutos.
+
+#### Passo 4 — Obter o IP Público da Aplicação
+Consulte as saídas geradas pelo Terraform:
+```bash
+make aws-output
+```
+
+Para recuperar o IP público da task ECS em execução via AWS CLI:
+```bash
+aws ecs list-tasks --cluster datathon-cluster --region us-east-2 --query 'taskArns[0]' --output text | \
+xargs -I {} aws ecs describe-tasks --cluster datathon-cluster --region us-east-2 --tasks {} \
+--query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text | \
+xargs -I {} aws ec2 describe-network-interfaces --region us-east-2 --network-interface-ids {} \
+--query 'NetworkInterfaces[0].Association.PublicIp' --output text
+```
+
+
+> Você também pode verificar o IP público diretamente pelo **Console da AWS**:
+> 1. Acesse o serviço **Elastic Container Service (ECS)** na região **us-east-2**.
+> 2. Clique em **Clusters** > **`datathon-cluster`** > aba **Tasks**.
+> 3. Clique na Task com status **RUNNING**.
+> 4. Na seção **Rede** (*Networking*), copie o valor do campo **IP público** (*Public IP*).
+
+---
+
+### 4. Validação da API na Nuvem
+
+Com o IP público obtido (exemplo: `3.15.XXX.XXX`), teste os endpoints remotos da API:
+
+#### 1. Liveness & Readiness Probe
+```bash
+curl -X GET http://<IP_PUBLICO>:8081/health
+```
+**Resposta esperada:**
+```json
+{
+  "status": "ok",
+  "service": "datathon-mlet",
+  "version": "1.0.0",
+  "ready": true
+}
+```
+
+#### 2. Documentação Swagger Interativa
+Abra no navegador para inspecionar os endpoints e schemas:
+```text
+http://<IP_PUBLICO>:8081/docs
+```
+
+#### 3. Teste de Recomendação de Canal (Thompson Sampling)
+```bash
+curl -X POST http://<IP_PUBLICO>:8081/api/v1/model/recommend \
+  -H "Content-Type: application/json" \
+  -d '{
+    "age": 37,
+    "job": "admin.",
+    "marital": "married",
+    "education": "university.degree",
+    "default": "no",
+    "housing": "no",
+    "loan": "no",
+    "month": "may",
+    "day_of_week": "mon",
+    "campaign": 1,
+    "pdays": 999,
+    "previous": 0,
+    "poutcome": "nonexistent",
+    "cons.price.idx": 93.994,
+    "cons.conf.idx": -36.4,
+    "euribor3m": 4.857,
+    "foi_contatado_antes": false
+  }'
+```
+
+#### 4. Auditoria da Política Ativa em Memória
+```bash
+curl -X GET http://<IP_PUBLICO>:8081/api/v1/model/info
+```
+
+---
+
+### 5. Destruição e Limpeza dos Recursos na AWS
+
+Para encerrar o ambiente e evitar custos residuais na conta AWS após testes ou demonstrações:
+```bash
+make aws-destroy
+```
+> Digite `yes` para confirmar a destruição de todos os recursos criados (Serviço ECS, Task, Cluster, Secrets, Roles e VPC).
+
+---
+
 ## Testes Automatizados e Qualidade
 
 O projeto conta com uma suíte abrangente de **52 testes automatizados** cobrindo contratos de API, schemas, políticas, geração de gráficos, persistência e sincronização de Data Lake:
@@ -378,7 +539,7 @@ make test
 # Executa checagem de estilo e formatação
 make format
 
-# Executa checagem de estilo e formatação (same as CI)
+# Executa testes e formatação (same as CI)
 make pre-commit
 ```
 
@@ -392,8 +553,11 @@ make pre-commit
 │   ├── processed/                      # Dataset limpo (bank_marketing_clean.parquet)
 │   └── raw/                            # Dataset original (bank-additional-full.csv)
 ├── deploy/                             # Scripts, configurações e arquivos para deploy dos serviços
-│   ├── docker/                         # Dockerfiles para deploy dos serviços
-│   └── terraform/                      # Scripts e configurações Terraform para deploy dos serviços
+│   ├── docker/                         # Dockerfile multi-stage para a API de produção
+│   │   └── Container                   # Build enxuto em 2 estágios (builder e runtime) com uv
+│   └── terraform/                      # Infraestrutura como Código (IaC) para AWS ECS Fargate
+│       ├── main.tf                     # Definição dos recursos (VPC, Subnets, ECS, IAM, Secrets)
+│       └── variables.tf                # Parser e injeção automática de variáveis lidas do .env
 ├── docs/                               # Documentação, decisões de arquitetura (ADRs) e diagramas
 ├── monitoring/                         # Configurações de monitoramento
 │   ├── grafana/                        # Configurações do Grafana

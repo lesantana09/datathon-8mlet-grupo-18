@@ -1,4 +1,4 @@
-"""Módulo de infraestrutura e clientes externos."""
+"""Módulo de integração com serviços externos."""
 
 from integrations.registry import RegistryClient
 from integrations.storage import StorageClient

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
     API_V1_STR: str = "/api/v1"
     ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8000"]
+    WEB_CONCURRENCY: int = 1
+    API_PORT: int = 8081
+    API_USERNAME: str
+    API_PASSWORD: str
 
     # ==========================================
     # Model Registry & Tracking (DagsHub / MLflow / OPTUNA)

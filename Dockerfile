@@ -95,8 +95,8 @@ HEALTHCHECK --interval=30s \
     --start-period=60s \
     --retries=3 \
     CMD python -c \
-    "import os, urllib.request; port = os.getenv('PORT', '8081'); urllib.request.urlopen(f'http://localhost:{port}/health')" \
+    "import os, urllib.request; port = os.getenv('API_PORT', '8081'); urllib.request.urlopen(f'http://localhost:{port}/health')" \
     || exit 1
 
 # Ponto de entrada: uvicorn sem --reload (controlado pela variavel ENVIRONMENT no lifespan)
-#CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8001"]
+#CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8081"]

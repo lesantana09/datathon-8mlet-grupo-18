@@ -1,37 +1,15 @@
-"""API de recomendação de canal (Etapa 5).
-
-A política é carregada no startup a partir do MLflow — o run mais recente
-publicado por `python -m datathon_mlet.train_and_publish_policy`. A API não
-treina mais nada: se o MLflow estiver inacessível ou nenhuma política tiver
-sido publicada, o startup falha explicitamente, em vez de silenciosamente
-servir um modelo diferente do que está registrado.
-
-Como o Thompson Sampling é não-contextual (decisão da Etapa 3),
-`POST /recommendations` recebe o contexto do cliente mas a recomendação hoje
-é a mesma para qualquer cliente — o contrato já aceita contexto para não
-quebrar numa eventual extensão contextual futura.
-"""
-
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, OAuth2PasswordBearer
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core.config import settings
-from core.logging import APILoggingMiddleware, setup_logging
+from core.logging import log_route, setup_logging
 from datathon_mlet.policies import ThompsonSamplingPolicy
 from datathon_mlet.policy_store import load_latest_policy
-from datathon_mlet.train_and_publish_policy import (
-    CLEAN_DATASET_PATH,
-    train_and_publish,
-)
+from datathon_mlet.train_and_publish_policy import CLEAN_DATASET_PATH, train_and_publish
 from datathon_mlet.use_cases import recommend_channel
-from integrations import RegistryClient
-
-from ..schemas import (
+from domain.schemas import (
     BatchRecommendationItem,
     BatchRecommendationsRequest,
     BatchRecommendationsResponse,
@@ -44,42 +22,13 @@ from ..schemas import (
     TrainRequest,
     TrainResponse,
 )
-
-SECRET = settings.AWS_SECRET_KEY
-
-client = RegistryClient()
+from integrations import RegistryClient
 
 logger = setup_logging()
 
+client = RegistryClient()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    app.state.policy = load_latest_policy()
-    yield
-
-
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description=settings.PROJECT_DESCRIPTION,
-    version=settings.PROJECT_VERSION,
-    lifespan=lifespan,
-)
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"]
-    if settings.ENVIRONMENT == "local"
-    else settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.add_middleware(APILoggingMiddleware, logger=logger)
-
+router = APIRouter(prefix=settings.API_V1_STR + "/model", tags=["Model"])
 
 # Configuração de autenticação básica
 security = HTTPBasic()
@@ -105,17 +54,14 @@ def verify_api_key(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.post("/recommendations", response_model=RecommendationResponse)
+@log_route(logger=logger, include_args=True)
+@router.post("/recommendation", response_model=RecommendationResponse)
 @client.trace(name="recommend_endpoint", span_type="CHAIN")
-def recommend(
+async def recommend(
+    request: Request,
     client_context: ClientContext,
     credentials: HTTPBasicCredentials = Depends(verify_api_key),
-) -> RecommendationResponse:
+    ) -> RecommendationResponse:
     """Endpoint para recomendação do canal de contato ideal para o cliente.
 
     Recebe os atributos de contexto do cliente, aciona a política ativa
@@ -127,73 +73,16 @@ def recommend(
     Returns:
         RecommendationResponse: Resposta contendo a ação recomendada.
     """
-    policy: ThompsonSamplingPolicy = app.state.policy
+    policy: ThompsonSamplingPolicy = request.app.state.policy
     recommended_action = recommend_channel(policy)
     return RecommendationResponse(recommended_action=recommended_action)
 
 
-@app.post("/train", response_model=TrainResponse)
-@client.trace(name="train_endpoint", span_type="CHAIN")
-def train(
-    credentials: HTTPBasicCredentials = Depends(verify_api_key),
-    payload: TrainRequest | None = None,
-) -> TrainResponse:
-    """Endpoint para acionamento de treinamento e publicação contínua da política.
-
-    Executa o treinamento da política Thompson Sampling utilizando os dados
-    limpos, persiste o artefato correspondente no MLflow e atualiza o estado
-    da aplicação em memória (hot-reload), permitindo que novas inferências
-    utilizem imediatamente o modelo recém-treinado.
-
-    Args:
-        payload: Configurações opcionais de dataset, braços e semente aleatória.
-
-    Returns:
-        TrainResponse: Informações da política gerada, parâmetros aprendidos e run_id do MLflow.
-
-    Raises:
-        HTTPException: Se o arquivo de dataset indicado não for encontrado no disco.
-    """
-    request_data = payload or TrainRequest()
-    dataset_file = (
-        Path(request_data.dataset_path)
-        if request_data.dataset_path
-        else CLEAN_DATASET_PATH
-    )
-
-    if not dataset_file.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Arquivo de dataset não encontrado no caminho: {dataset_file}",
-        )
-
-    try:
-        new_policy, run_id = train_and_publish(
-            dataset_path=dataset_file,
-            arms=request_data.arms,
-            seed=request_data.seed,
-        )
-        # Hot-reload da política em memória na aplicação
-        app.state.policy = new_policy
-
-        return TrainResponse(
-            status="success",
-            run_id=run_id,
-            recommended_action=new_policy.recommend(),
-            alpha_params=new_policy.alpha,
-            beta_params=new_policy.beta,
-        )
-    except Exception as exc:
-        logger.exception("Falha ao executar treinamento via endpoint /train: %s", exc)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro interno ao treinar e publicar política: {exc}",
-        ) from exc
-
-
-@app.get("/model/info", response_model=ModelInfoResponse)
+@log_route(logger=logger, include_args=True)
+@router.get("/", response_model=ModelInfoResponse)
 @client.trace(name="model_info_endpoint", span_type="CHAIN")
-def model_info(
+async def model_info(
+    request: Request,
     credentials: HTTPBasicCredentials = Depends(verify_api_key),
     ) -> ModelInfoResponse:
     """Retorna os metadados e parâmetros da política atualmente servida pela API.
@@ -204,7 +93,7 @@ def model_info(
     Returns:
         ModelInfoResponse: Estado atual dos braços e decisão ótima do modelo.
     """
-    policy = app.state.policy
+    policy = request.app.state.policy
     alpha = getattr(policy, "alpha", {})
     beta = getattr(policy, "beta", {})
     arms = list(alpha.keys()) if alpha else []
@@ -224,12 +113,14 @@ def model_info(
     )
 
 
-@app.post("/feedback", response_model=FeedbackResponse)
+@log_route(logger=logger, include_args=True)
+@router.patch("/feedback", response_model=FeedbackResponse)
 @client.trace(name="feedback_endpoint", span_type="CHAIN")
-def feedback(
+async def feedback(
+    request: Request,
     event: FeedbackRequest,
     credentials: HTTPBasicCredentials = Depends(verify_api_key),
-) -> FeedbackResponse:
+    ) -> FeedbackResponse:
     """Registra o feedback de conversão observado para um canal (loop fechado do bandit).
 
     Atualiza em tempo real a distribuição Beta do braço acionado com a nova recompensa,
@@ -247,7 +138,7 @@ def feedback(
     """
     import mlflow
 
-    policy = app.state.policy
+    policy = request.app.state.policy
     if not hasattr(policy, "alpha") or event.arm not in policy.alpha:
         raise HTTPException(
             status_code=400,
@@ -294,9 +185,11 @@ def feedback(
     )
 
 
-@app.post("/model/reload", response_model=ModelReloadResponse)
+@log_route(logger=logger, include_args=True)
+@router.patch("/", response_model=ModelReloadResponse)
 @client.trace(name="model_reload_endpoint", span_type="CHAIN")
-def reload_model(
+async def reload_model(
+    request: Request,
     credentials: HTTPBasicCredentials = Depends(verify_api_key),
     ) -> ModelReloadResponse:
     """Recarrega sob demanda a política mais recente publicada no MLflow ou S3.
@@ -312,13 +205,13 @@ def reload_model(
     """
     try:
         new_policy = load_latest_policy(fallback_to_s3=True)
-        app.state.policy = new_policy
+        request.app.state.policy = new_policy
 
         alpha = getattr(new_policy, "alpha", {})
         beta = getattr(new_policy, "beta", {})
         recommended = new_policy.recommend() if hasattr(new_policy, "recommend") else ""
 
-        logger.info("Modelo recarregado com sucesso no endpoint /model/reload.")
+        logger.info("Modelo recarregado com sucesso no endpoint /model.")
         return ModelReloadResponse(
             status="success",
             message="Política mais recente recarregada com sucesso a partir do registro.",
@@ -334,29 +227,31 @@ def reload_model(
         ) from exc
 
 
-@app.post("/batch-recommendations", response_model=BatchRecommendationsResponse)
+@log_route(logger=logger, include_args=True)
+@router.patch("/batch", response_model=BatchRecommendationsResponse)
 @client.trace(name="batch_recommendations_endpoint", span_type="CHAIN")
-def batch_recommendations(
-    request: BatchRecommendationsRequest,
+async def batch_recommendations(
+    request: Request,
+    request_data: BatchRecommendationsRequest,
     credentials: HTTPBasicCredentials = Depends(verify_api_key),
-) -> BatchRecommendationsResponse:
+    ) -> BatchRecommendationsResponse:
     """Gera recomendações de canal em lote para múltiplos clientes.
 
     Ideal para operações em batch de campanhas de telemarketing diárias,
     minimizando o overhead de tráfego de rede e chamadas HTTP repetitivas.
 
     Args:
-        request: Lista com os contextos individuais de cada cliente da base.
+        request_data: Lista com os contextos individuais de cada cliente da base.
 
     Returns:
         BatchRecommendationsResponse: Lista consolidada de recomendações indexadas.
     """
     import mlflow
 
-    policy: ThompsonSamplingPolicy = app.state.policy
+    policy: ThompsonSamplingPolicy = request.app.state.policy
     recommendations: list[BatchRecommendationItem] = []
 
-    for index, _ in enumerate(request.clients):
+    for index, _ in enumerate(request_data.clients):
         # Para Thompson Sampling determinístico/média posterior na inferência
         action = recommend_channel(policy)
         recommendations.append(
@@ -367,7 +262,7 @@ def batch_recommendations(
     if span is not None:
         span.set_attributes(
             {
-                "batch_size": len(request.clients),
+                "batch_size": len(request_data.clients),
                 "recommended_action": policy.recommend()
                 if hasattr(policy, "recommend")
                 else "unknown",
@@ -378,3 +273,64 @@ def batch_recommendations(
         total=len(recommendations),
         recommendations=recommendations,
     )
+
+
+@log_route(logger=logger, include_args=True)
+@router.put("/train", response_model=TrainResponse)
+@client.trace(name="train_endpoint", span_type="CHAIN")
+async def train(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verify_api_key),
+    payload: TrainRequest | None = None,
+    ) -> TrainResponse:
+    """Endpoint para acionamento de treinamento e publicação contínua da política.
+
+    Executa o treinamento da política Thompson Sampling utilizando os dados
+    limpos, persiste o artefato correspondente no MLflow e atualiza o estado
+    da aplicação em memória (hot-reload), permitindo que novas inferências
+    utilizem imediatamente o modelo recém-treinado.
+
+    Args:
+        payload: Configurações opcionais de dataset, braços e semente aleatória.
+
+    Returns:
+        TrainResponse: Informações da política gerada, parâmetros aprendidos e run_id do MLflow.
+
+    Raises:
+        HTTPException: Se o arquivo de dataset indicado não for encontrado no disco.
+    """
+    request_data = payload or TrainRequest()
+    dataset_file = (
+        Path(request_data.dataset_path)
+        if request_data.dataset_path
+        else CLEAN_DATASET_PATH
+    )
+
+    if not dataset_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Arquivo de dataset não encontrado no caminho: {dataset_file}",
+        )
+
+    try:
+        new_policy, run_id = train_and_publish(
+            dataset_path=dataset_file,
+            arms=request_data.arms,
+            seed=request_data.seed,
+        )
+        # Hot-reload da política em memória na aplicação
+        request.app.state.policy = new_policy
+
+        return TrainResponse(
+            status="success",
+            run_id=run_id,
+            recommended_action=new_policy.recommend(),
+            alpha_params=new_policy.alpha,
+            beta_params=new_policy.beta,
+        )
+    except Exception as exc:
+        logger.exception("Falha ao executar treinamento via endpoint /train: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao treinar e publicar política: {exc}",
+        ) from exc

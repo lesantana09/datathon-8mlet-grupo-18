@@ -1,0 +1,86 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": {
+                    "type": "grafana",
+                    "uid": "-- Grafana --"
+                },
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": 5,
+    "links": [],
+    "panels": [
+        {
+            "datasource": {
+                "type": "loki",
+                "uid": "P8E80F9AEF21F6940"
+            },
+            "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 21,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "options": {
+                "dedupStrategy": "none",
+                "detailsMode": "sidebar",
+                "enableInfiniteScrolling": true,
+                "enableLogDetails": true,
+                "showControls": true,
+                "showTime": false,
+                "sortOrder": "Descending",
+                "syntaxHighlighting": true,
+                "wrapLogMessage": false
+            },
+            "pluginVersion": "12.3.9",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "loki",
+                        "uid": "P8E80F9AEF21F6940"
+                    },
+                    "direction": "backward",
+                    "editorMode": "code",
+                    "expr": "{stream=\"stdout\"}",
+                    "queryType": "range",
+                    "refId": "A"
+                }
+            ],
+            "title": "Standard Output Logs",
+            "transparent": true,
+            "type": "logs"
+        }
+    ],
+    "preload": false,
+    "refresh": "5s",
+    "schemaVersion": 42,
+    "tags": [],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-5m",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "Docker Logs",
+    "uid": "add7sbl",
+    "version": 8
+}

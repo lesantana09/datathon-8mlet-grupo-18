@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from api import app, main
+from api import app, main, model
 from core.config import settings
 from datathon_mlet.policies import FixedPolicy, ThompsonSamplingPolicy
 
@@ -128,7 +128,7 @@ def test_train_endpoint_success_and_hot_reloads_policy(
     mock_policy.beta["cellular"] = 5.0
 
     monkeypatch.setattr(
-        main,
+        model,
         "train_and_publish",
         lambda dataset_path, arms, seed: (mock_policy, "fake_run_123"),
     )
@@ -170,7 +170,7 @@ def test_model_info_returns_current_policy_state(client: TestClient) -> None:
 
 
 def test_feedback_updates_arm_distribution_in_real_time(client: TestClient) -> None:
-    """Valida se POST /feedback atualiza os parâmetros da política em memória (loop fechado)."""
+    """Valida se PATCH /feedback atualiza os parâmetros da política em memória (loop fechado)."""
     # Consulta estado inicial
     initial_info = client.get("/api/v1/model", auth=AUTH).json()
     prev_alpha = initial_info["alpha_params"]["cellular"]
@@ -181,7 +181,7 @@ def test_feedback_updates_arm_distribution_in_real_time(client: TestClient) -> N
         "reward": 1,
         "client_id": "test_client_001",
     }
-    response = client.post("/api/v1/feedback", json=feedback_payload, auth=AUTH)
+    response = client.patch("/api/v1/model/feedback", json=feedback_payload, auth=AUTH)
 
     assert response.status_code == 200
     data = response.json()
@@ -196,9 +196,9 @@ def test_feedback_updates_arm_distribution_in_real_time(client: TestClient) -> N
 
 
 def test_feedback_rejects_invalid_arm(client: TestClient) -> None:
-    """Valida se POST /feedback retorna 400 para canais desconhecidos."""
-    response = client.post(
-        "/api/v1/feedback",
+    """Valida se PATCH /feedback retorna 400 para canais desconhecidos."""
+    response = client.patch(
+        "/api/v1/model/feedback",
         json={"arm": "canal_inexistente", "reward": 1},
         auth=AUTH,
     )
@@ -208,9 +208,9 @@ def test_feedback_rejects_invalid_arm(client: TestClient) -> None:
 
 
 def test_feedback_validates_binary_reward(client: TestClient) -> None:
-    """Valida se POST /feedback retorna 422 para recompensas fora de [0, 1]."""
-    response = client.post(
-        "/api/v1/feedback",
+    """Valida se PATCH /feedback retorna 422 para recompensas fora de [0, 1]."""
+    response = client.patch(
+        "/api/v1/model/feedback",
         json={"arm": "cellular", "reward": 5},
         auth=AUTH,
         )
@@ -221,11 +221,11 @@ def test_feedback_validates_binary_reward(client: TestClient) -> None:
 def test_batch_recommendations_returns_ordered_recommendations(
     client: TestClient,
 ) -> None:
-    """Valida se POST /batch-recommendations processa lista de clientes e retorna itens indexados."""
+    """Valida se PATCH /batch-recommendations processa lista de clientes e retorna itens indexados."""
     batch_payload = {
         "clients": [VALID_CLIENT_PAYLOAD, VALID_CLIENT_PAYLOAD, VALID_CLIENT_PAYLOAD]
     }
-    response = client.post("/api/v1/model/batch", json=batch_payload, auth=AUTH)
+    response = client.patch("/api/v1/model/batch", json=batch_payload, auth=AUTH)
 
     assert response.status_code == 200
     data = response.json()
@@ -239,7 +239,7 @@ def test_batch_recommendations_returns_ordered_recommendations(
 
 
 def test_batch_recommendations_rejects_empty_clients_list(client: TestClient) -> None:
-    """Valida se POST /batch-recommendations rejeita lista vazia de clientes."""
-    response = client.post("/api/v1/model/batch", json={"clients": []}, auth=AUTH)
+    """Valida se PATCH /batch-recommendations rejeita lista vazia de clientes."""
+    response = client.patch("/api/v1/model/batch", json={"clients": []}, auth=AUTH)
 
     assert response.status_code == 405

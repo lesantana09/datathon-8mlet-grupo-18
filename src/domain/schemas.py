@@ -217,7 +217,6 @@ class BatchRecommendationsRequest(BaseModel):
     """Payload para solicitação de recomendações de múltiplos clientes em lote."""
 
     clients: list[ClientContext] = Field(
-        min_length=1,
         description="Lista contendo os contextos dos clientes a serem processados.",
     )
 

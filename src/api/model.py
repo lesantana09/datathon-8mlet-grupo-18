@@ -249,6 +249,11 @@ async def batch_recommendations(
     import mlflow
 
     policy: ThompsonSamplingPolicy = request.app.state.policy
+    if not request_data.clients:
+        raise HTTPException(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail="A lista de clientes não pode estar vazia.",
+        )
     recommendations: list[BatchRecommendationItem] = []
 
     for index, _ in enumerate(request_data.clients):

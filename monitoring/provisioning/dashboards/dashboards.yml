@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: 'Model Monitoring'
+    orgId: 1
+    folder: 'Datathon 8MLET Grupo 18'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

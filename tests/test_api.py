@@ -3,9 +3,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from datathon_mlet.api.entrypoints import main
-from datathon_mlet.api.entrypoints.main import app
+from api import app, main, model
+from core.config import settings
 from datathon_mlet.policies import FixedPolicy, ThompsonSamplingPolicy
+
+# Autentica usando HTTPBasic authentication
+API_USERNAME = settings.API_USERNAME
+API_PASSWORD = settings.API_PASSWORD
+AUTH = (API_USERNAME, API_PASSWORD)
 
 VALID_CLIENT_PAYLOAD = {
     "age": 37,
@@ -29,7 +34,7 @@ VALID_CLIENT_PAYLOAD = {
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch):
+def client(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Substitui o carregamento da política no startup por uma política local.
 
     A API carrega a política do MLflow no `lifespan`; sem esse patch, a
@@ -42,6 +47,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
         lambda: ThompsonSamplingPolicy(arms=["cellular", "telephone"]),
     )
 
+
     with TestClient(app) as test_client:
         yield test_client
 
@@ -50,11 +56,17 @@ def test_health_returns_ok(client: TestClient) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+
+
+def test_protected_endpoint_rejects_missing_token(client: TestClient) -> None:
+    response = client.get("/api/v1/model/", auth=("inexitent-user", "wrong-password"))
+
+    assert response.status_code == 401
 
 
 def test_recommendations_returns_known_arm(client: TestClient) -> None:
-    response = client.post("/recommendations", json=VALID_CLIENT_PAYLOAD)
+    response = client.post("/api/v1/model/recommend", json=VALID_CLIENT_PAYLOAD, auth=AUTH)
 
     assert response.status_code == 200
     assert response.json()["recommended_action"] in {"cellular", "telephone"}
@@ -64,7 +76,7 @@ def test_recommendations_rejects_missing_field(client: TestClient) -> None:
     incomplete_payload = dict(VALID_CLIENT_PAYLOAD)
     del incomplete_payload["age"]
 
-    response = client.post("/recommendations", json=incomplete_payload)
+    response = client.post("/api/v1/model/recommend", json=incomplete_payload, auth=AUTH)
 
     assert response.status_code == 422
 
@@ -73,7 +85,7 @@ def test_recommendations_rejects_wrong_type(client: TestClient) -> None:
     invalid_payload = dict(VALID_CLIENT_PAYLOAD)
     invalid_payload["age"] = "trinta e sete"
 
-    response = client.post("/recommendations", json=invalid_payload)
+    response = client.post("/api/v1/model/recommend", json=invalid_payload, auth=AUTH)
 
     assert response.status_code == 422
 
@@ -84,7 +96,7 @@ def test_recommendations_rejects_value_outside_allowed_options(
     invalid_payload = dict(VALID_CLIENT_PAYLOAD)
     invalid_payload["marital"] = "namorando"
 
-    response = client.post("/recommendations", json=invalid_payload)
+    response = client.post("/api/v1/model/recommend", json=invalid_payload, auth=AUTH)
 
     assert response.status_code == 422
 
@@ -98,7 +110,136 @@ def test_recommendations_follows_injected_policy(client: TestClient) -> None:
     """
     app.state.policy = FixedPolicy(arm="telephone")
 
-    response = client.post("/recommendations", json=VALID_CLIENT_PAYLOAD)
+    response = client.post("/api/v1/model/recommend", json=VALID_CLIENT_PAYLOAD, auth=AUTH)
 
     assert response.status_code == 200
     assert response.json()["recommended_action"] == "telephone"
+
+
+def test_train_endpoint_success_and_hot_reloads_policy(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Valida se POST /train publica o modelo e atualiza app.state.policy com hot reload."""
+    fake_dataset = tmp_path / "fake_clean.parquet"
+    fake_dataset.touch()
+
+    mock_policy = ThompsonSamplingPolicy(arms=["cellular", "telephone"])
+    mock_policy.alpha["cellular"] = 50.0
+    mock_policy.beta["cellular"] = 5.0
+
+    monkeypatch.setattr(
+        model,
+        "train_and_publish",
+        lambda dataset_path, arms, seed: (mock_policy, "fake_run_123"),
+    )
+
+    response = client.put("/api/v1/model/train", json={"dataset_path": str(fake_dataset)}, auth=AUTH)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["run_id"] == "fake_run_123"
+    assert data["recommended_action"] == "cellular"
+    assert data["alpha_params"]["cellular"] == 50.0
+    # Verifica hot-reload no app.state.policy
+    assert app.state.policy.alpha["cellular"] == 50.0
+
+
+def test_train_endpoint_returns_404_when_dataset_not_found(client: TestClient) -> None:
+    """Valida se POST /train retorna 404 quando o arquivo de dataset não existe."""
+    response = client.put(
+        "/api/v1/model/train", json={"dataset_path": "caminho/para/arquivo/inexistente.parquet"}, auth=AUTH
+    )
+
+    assert response.status_code == 404
+    assert "não encontrado" in response.json()["detail"]
+
+
+def test_model_info_returns_current_policy_state(client: TestClient) -> None:
+    """Valida se GET /model/info expõe os parâmetros atuais e médias dos braços."""
+    response = client.get("/api/v1/model", auth=AUTH)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["model_type"] == "ThompsonSamplingPolicy"
+    assert set(data["arms"]) == {"cellular", "telephone"}
+    assert "cellular" in data["alpha_params"]
+    assert "telephone" in data["beta_params"]
+    assert "posterior_means" in data
+    assert data["recommended_action"] in {"cellular", "telephone"}
+
+
+def test_feedback_updates_arm_distribution_in_real_time(client: TestClient) -> None:
+    """Valida se PATCH /feedback atualiza os parâmetros da política em memória (loop fechado)."""
+    # Consulta estado inicial
+    initial_info = client.get("/api/v1/model", auth=AUTH).json()
+    prev_alpha = initial_info["alpha_params"]["cellular"]
+
+    # Envia conversão de sucesso para o braço 'cellular'
+    feedback_payload = {
+        "arm": "cellular",
+        "reward": 1,
+        "client_id": "test_client_001",
+    }
+    response = client.patch("/api/v1/model/feedback", json=feedback_payload, auth=AUTH)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["arm"] == "cellular"
+    assert data["reward"] == 1
+    assert data["updated_alpha"] == prev_alpha + 1
+
+    # Confirma que o estado interno do app.state.policy foi de fato atualizado
+    updated_info = client.get("/api/v1/model", auth=AUTH).json()
+    assert updated_info["alpha_params"]["cellular"] == prev_alpha + 1
+
+
+def test_feedback_rejects_invalid_arm(client: TestClient) -> None:
+    """Valida se PATCH /feedback retorna 400 para canais desconhecidos."""
+    response = client.patch(
+        "/api/v1/model/feedback",
+        json={"arm": "canal_inexistente", "reward": 1},
+        auth=AUTH,
+    )
+
+    assert response.status_code == 400
+    assert "inválido" in response.json()["detail"]
+
+
+def test_feedback_validates_binary_reward(client: TestClient) -> None:
+    """Valida se PATCH /feedback retorna 422 para recompensas fora de [0, 1]."""
+    response = client.patch(
+        "/api/v1/model/feedback",
+        json={"arm": "cellular", "reward": 5},
+        auth=AUTH,
+        )
+
+    assert response.status_code == 422
+
+
+def test_batch_recommendations_returns_ordered_recommendations(
+    client: TestClient,
+) -> None:
+    """Valida se PATCH /batch-recommendations processa lista de clientes e retorna itens indexados."""
+    batch_payload = {
+        "clients": [VALID_CLIENT_PAYLOAD, VALID_CLIENT_PAYLOAD, VALID_CLIENT_PAYLOAD]
+    }
+    response = client.patch("/api/v1/model/batch", json=batch_payload, auth=AUTH)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert len(data["recommendations"]) == 3
+    assert data["recommendations"][0]["index"] == 0
+    assert data["recommendations"][1]["index"] == 1
+    assert data["recommendations"][2]["index"] == 2
+    for item in data["recommendations"]:
+        assert item["recommended_action"] in {"cellular", "telephone"}
+
+
+def test_batch_recommendations_rejects_empty_clients_list(client: TestClient) -> None:
+    """Valida se PATCH /batch-recommendations rejeita lista vazia de clientes."""
+    response = client.patch("/api/v1/model/batch", json={"clients": []}, auth=AUTH)
+
+    assert response.status_code == 405

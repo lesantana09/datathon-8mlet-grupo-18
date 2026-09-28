@@ -256,3 +256,8 @@ credentials*.json
 *.nbconvert.ipynb
 
 .claude/*
+
+# Terraform local variables
+*.tfvars
+*.tfstate
+*.tfstate.*

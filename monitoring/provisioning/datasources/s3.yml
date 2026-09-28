@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: S3-Parquet
+    type: tobiasworkstech-parquets3-datasource
+    access: proxy
+    jsonData:
+      authType: keys
+      endpoint: ${AWS_ENDPOINT_URL}
+      defaultRegion: ${AWS_REGION}
+      bucket: ${BUCKET_NAME}
+      forcePathStyle: true
+    secureJsonData:
+      accessKey: ${AWS_ACCESS_KEY}
+      secretKey: ${AWS_SECRET_KEY}

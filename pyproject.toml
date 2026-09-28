@@ -4,17 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datathon-mlet"
-version = "0.1.0"
-description = "Estrutura inicial do Datathon de Machine Learning Engineering da FIAP POSTECH."
+version = "1.0.0"
+description = "Datathon MLET — Recomendação de Canal"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+    "boto3>=1.43.98",
     "fastapi>=0.115",
     "mlflow>=2.19",
     "numpy>=1.26",
     "pandas>=2.2",
+    "prometheus-fastapi-instrumentator>=8.1.0",
     "pydantic>=2.10",
+    "pydantic-settings>=2.15.0",
     "scikit-learn>=1.5",
+    "starlette-context>=0.5.1",
     "uvicorn>=0.34",
 ]
 
@@ -31,10 +35,16 @@ dev = [
     "seaborn>=0.13",
 ]
 
+[tool.uv.pip]
+python-version = "3.11.8"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:The `anyio\\.abc\\.BlockingPortal` alias is deprecated:DeprecationWarning:starlette.testclient"
+]
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
@@ -45,3 +55,4 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

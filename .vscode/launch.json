@@ -7,7 +7,7 @@
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "datathon_mlet.api.entrypoints.main:app",
+                "api:app",
                 "--port",
                 "8081"
             ],

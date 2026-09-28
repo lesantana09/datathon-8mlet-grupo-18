@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # O URL usa o nome do serviço do docker-compose ("prometheus") e a porta 9090
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false # Impede que alguém altere a URL acidentalmente pela interface Web

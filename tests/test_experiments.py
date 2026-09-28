@@ -74,3 +74,12 @@ def test_logs_nested_run_per_seed_and_aggregate_on_parent_run(
     assert len(seed_runs) == n_seeds
     assert set(seed_runs["params.seed"]) == {"0", "1", "2", "3"}
     assert len(results.ts_conversion_rates) == n_seeds
+
+    # Validação da presença dos artefatos visuais no run pai
+    parent_run_id = parent_runs.iloc[0]["run_id"]
+    artifacts = [
+        item.path
+        for item in mlflow.tracking.MlflowClient().list_artifacts(parent_run_id)
+    ]
+    assert "learning_curves.png" in artifacts
+    assert "posterior_distributions.png" in artifacts

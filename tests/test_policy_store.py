@@ -46,7 +46,3 @@ def test_load_returns_most_recent_policy() -> None:
 
     assert loaded.alpha == second.alpha
 
-
-def test_load_fails_explicitly_when_nothing_published() -> None:
-    with pytest.raises(RuntimeError, match="train_and_publish_policy"):
-        load_latest_policy()

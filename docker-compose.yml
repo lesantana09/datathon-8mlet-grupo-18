@@ -1,49 +1,106 @@
-services:
-  api:
-    build: .
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./data/processed:/app/data/processed:ro
-    environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-    depends_on:
-      mlflow:
-        condition: service_healthy
-    command:
-      - uvicorn
-      - datathon_mlet.api.entrypoints.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8081"
+name: datathon-8mlet-grupo-18
 
-  mlflow:
-    build: .
+services:
+  # ---------------------------------------------------------
+  # FastAPI: Aplicação de Inferência e API
+  # --------------------------------------------------------
+  api:
+    image: ghcr.io/tramontano/datathon-8mlet-grupo-18:1.0.0
+    build:
+      context: .
+      dockerfile: deploy/docker/Container
     ports:
-      - "5000:5000"
-    volumes:
-      - ./mlruns:/app/mlruns
-    environment:
-      - MLFLOW_SERVER_ALLOWED_HOSTS=mlflow:5000,localhost:5000,127.0.0.1:5000
+      - "${API_PORT:-8081}:8081"
+    env_file: ".env"
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - import urllib.request; urllib.request.urlopen("http://localhost:5000")
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
+      test: [ "CMD", "curl", "-f", "http://localhost:${API_PORT:-8081}/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     command:
-      - mlflow
-      - server
-      - --host
-      - 0.0.0.0
-      - --port
-      - "5000"
-      - --backend-store-uri
-      - sqlite:////app/mlruns/mlflow.db
-      - --artifacts-destination
-      - file:/app/mlruns/artifacts
+      - "uvicorn"
+      - "api:app"
+      - "--host"
+      - "${API_HOST:-0.0.0.0}"
+      - "--port"
+      - "${API_PORT:-8081}"
+      - "--workers"
+      - "${WEB_CONCURRENCY:-1}"
+
+  # ---------------------------------------------------------
+  # Observability Layer
+  # ---------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+
+  grafana:
+    image: grafana/grafana:12.3.9
+    ports:
+      - "3000:3000"
+    env_file: ".env"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED}
+      - GF_INSTALL_PLUGINS=tobiasworkstech-parquets3-datasource
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY}
+      - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL}
+      - AWS_REGION=${AWS_REGION}
+      - BUCKET_NAME=${BUCKET_NAME}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Provisionamento automático de Dashboards e Data Sources
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+  loki:
+    image: grafana/loki:3.7.3
+    user: 10001:10001
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml
+    environment:
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY}
+      - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL}
+      - AWS_REGION=${AWS_REGION}
+      - BUCKET_NAME=${BUCKET_NAME}
+      - LOKI_INSTANCE_ID=datathon-loki-1
+    command: [ "-config.file=/etc/loki/loki-config.yaml", "-config.expand-env=true" ]
+    healthcheck:
+      test: [ "CMD", "/usr/bin/loki", "-health" ]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  promtail:
+    image: grafana/promtail:3.6.11
+    volumes:
+      - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: always
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:

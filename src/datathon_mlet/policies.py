@@ -1,6 +1,7 @@
 """Políticas de decisão: baseline determinístico e Thompson Sampling."""
 
 from typing import Protocol
+import mlflow
 
 import numpy as np
 
@@ -38,7 +39,7 @@ class FixedPolicy:
         return self.arm
 
 
-class ThompsonSamplingPolicy:
+class ThompsonSamplingPolicy(mlflow.pyfunc.PythonModel):
     """Algoritmo Thompson Sampling para o problema Multi-Armed Bandit.
 
     Mantém uma distribuição Beta(alpha, beta) por braço. A cada passo,

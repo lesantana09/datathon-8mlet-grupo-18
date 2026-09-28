@@ -82,6 +82,11 @@ def log_policy(
     Returns:
         str: Identificador do run gerado no MLflow.
     """
+    input_example = ["cellular", "telephone"]
+    ts_model = ThompsonSamplingPolicy(arms=input_example)
+    output_example = ts_model.recommend()
+    signature = mlflow.models.infer_signature(input_example, output_example)
+
     client = RegistryClient()
     with client.start_run() as run:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -89,6 +94,13 @@ def log_policy(
             with open(artifact_path, "wb") as f:
                 pickle.dump(policy, f)
             client.log_artifact(str(artifact_path))
+
+        mlflow.pyfunc.log_model(
+            artifact_path="thompson_sampling_model",
+            python_model=policy,
+            signature=signature,
+            registered_model_name="Thompson-Sampling-Bandit",  # Nome no Registry
+        )
 
     if sync_to_s3:
         try:
@@ -148,3 +160,19 @@ def load_latest_policy(fallback_to_s3: bool = False) -> ThompsonSamplingPolicy:
         "`uv run python -m datathon_mlet.train_and_publish_policy` primeiro."
     )
     raise RuntimeError(msg)
+
+if __name__ == "__main__":
+    # Registrando o modelo no MLFLOW
+    input_example = ["cellular", "telephone"]
+    ts_model = ThompsonSamplingPolicy(arms=input_example)
+    output_example = ts_model.recommend()
+    signature = mlflow.models.infer_signature(input_example, output_example)
+
+    client = RegistryClient()
+    with client.start_run() as run:
+        mlflow.pyfunc.log_model(
+        artifact_path="thompson_sampling_model",
+        python_model=ts_model,
+        signature=signature,
+        registered_model_name="Thompson-Sampling-Bandit",  # Nome no Registry
+    )
